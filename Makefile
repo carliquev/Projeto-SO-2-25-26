@@ -11,7 +11,7 @@ OBJ_DIR     := obj
 BIN_DIR     := bin
 
 # ========== Executables ==========
-PACMANIST := Pacmanist
+PACMANIST := PacmanIST
 CLIENT   := client
 
 # ========== Object lists ==========

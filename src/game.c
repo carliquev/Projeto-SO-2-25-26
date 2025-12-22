@@ -6,9 +6,12 @@
 #include <time.h>
 #include <sys/types.h>
 #include <dirent.h>
+#include <errno.h>
 #include <unistd.h>
 #include <sys/wait.h>
 #include <pthread.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 
 #define CONTINUE_PLAY 0
 #define NEXT_LEVEL 1
@@ -152,15 +155,38 @@ void* ghost_thread(void *arg) {
 }
 
 int main(int argc, char** argv) {
-    if (argc != 2) {
-        printf("Usage: %s <level_directory>\n", argv[0]);
+    if (argc != 4) {
+        printf("Usage: %s <level_directory> <max_games> <nome_do_FIFO_de_registo>\n", argv[0]);
         return -1;
+    }
+
+    int max_games = atoi(argv[2]);
+    char* fifo_path = argv[3];
+
+    /* remove pipe if it exists */
+    if (unlink(fifo_path) != 0 && errno != ENOENT) {
+        perror("[ERR]: unlink(%s) failed");
+        exit(EXIT_FAILURE);
+    }
+
+    /* create pipe */
+    if (mkfifo(fifo_path, 0640) != 0) {
+        perror("[ERR]: mkfifo failed");
+        exit(EXIT_FAILURE);
+    }
+
+    int tx = open(fifo_path, O_RDONLY);
+    if (tx == -1) {
+        perror("[ERR]: open failed");
+        exit(EXIT_FAILURE);
     }
 
     // Random seed for any random movements
     srand((unsigned int)time(NULL));
 
     DIR* level_dir = opendir(argv[1]);
+
+
         
     if (level_dir == NULL) {
         fprintf(stderr, "Failed to open directory: %s\n", argv[1]);
