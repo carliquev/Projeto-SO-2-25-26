@@ -307,7 +307,7 @@ int main(int argc, char** argv) {
 
                         return 1;
                     } else {
-                        // No backup process, game over
+                        //No backup process, game over
                         result = QUIT_GAME;
                     }
                 }
