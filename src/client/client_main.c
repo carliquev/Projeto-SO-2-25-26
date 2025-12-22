@@ -92,11 +92,11 @@ int main(int argc, char *argv[]) {
     int ch;
 
     while (1) {
-
         pthread_mutex_lock(&mutex);
-        if (stop_execution)
+        if (stop_execution) {
             pthread_mutex_unlock(&mutex);
             break;
+        }
         pthread_mutex_unlock(&mutex);
 
         if (cmd_fp) {

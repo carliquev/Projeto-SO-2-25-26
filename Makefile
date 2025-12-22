@@ -1,56 +1,71 @@
-# Compiler variables
-CC = gcc
-CFLAGS = -g -Wall -Wextra -std=c17 -D_POSIX_C_SOURCE=200809L
-LDFLAGS = -lncurses
+# ========== Compiler ==========
+CC      := gcc
+CFLAGS  := -g -Wall -Wextra -Werror -std=c17 -D_POSIX_C_SOURCE=200809L
+LDLIBS  := -lncurses -pthread
 
-# Directory variables
-OBJ_DIR = obj
-BIN_DIR = bin
-INCLUDE_DIR = include
-CLIENT_DIR = src/client
+# ========== Directories ==========
+SRC_DIR     := src
+CLIENT_DIR  := src/client
+INCLUDE_DIR := include
+OBJ_DIR     := obj
+BIN_DIR     := bin
 
-# executable 
-TARGET = Pacmanist
+# ========== Executables ==========
+PACMANIST := Pacmanist
+CLIENT   := client
 
-#client
-CLIENT = client
+# ========== Object lists ==========
+PACMANIST_OBJS := \
+	$(OBJ_DIR)/server/game.o \
+	$(OBJ_DIR)/server/parser.o \
+	$(OBJ_DIR)/server/board.o \
+	$(OBJ_DIR)/server/display.o
 
+CLIENT_OBJS := \
+	$(OBJ_DIR)/client/client_main.o \
+	$(OBJ_DIR)/client/debug.o \
+	$(OBJ_DIR)/client/api.o \
+	$(OBJ_DIR)/client/display.o
 
-#Client objects
-OBJS_CLIENT = client_main.o debug.o api.o display.o
+# ========== Default target ==========
+all: $(BIN_DIR)/$(PACMANIST) $(BIN_DIR)/$(CLIENT)
 
-# Dependencies
-display.o = display.h
-board.o = board.h
-parser.o = parser.h
-api.o = api.h protocol.h
+# ========== Link ==========
+$(BIN_DIR)/$(PACMANIST): $(PACMANIST_OBJS) | $(BIN_DIR)
+	$(CC) $(CFLAGS) $^ -o $@ $(LDLIBS)
 
-# Object files path
-vpath %.o $(OBJ_DIR)
-vpath %.c $(CLIENT_DIR) $(INCLUDE_DIR)
+$(BIN_DIR)/$(CLIENT): $(CLIENT_OBJS) | $(BIN_DIR)
+	$(CC) $(CFLAGS) $^ -o $@ $(LDLIBS)
 
-# Make targets
-all: client
+# ========== Compile rules ==========
+$(OBJ_DIR)/server/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR)/server
+	$(CC) -I$(INCLUDE_DIR) $(CFLAGS) -c $< -o $@
 
+$(OBJ_DIR)/client/%.o: $(CLIENT_DIR)/%.c | $(OBJ_DIR)/client
+	$(CC) -I$(INCLUDE_DIR) $(CFLAGS) -c $< -o $@
+
+# ========== Folders ==========
+$(BIN_DIR):
+	mkdir -p $@
+
+$(OBJ_DIR)/server:
+	mkdir -p $@
+
+$(OBJ_DIR)/client:
+	mkdir -p $@
+
+# ========== Convenience ==========
+pacmanist: $(BIN_DIR)/$(PACMANIST)
 client: $(BIN_DIR)/$(CLIENT)
 
-$(BIN_DIR)/$(CLIENT): $(OBJS_CLIENT) | folders
-	$(CC) $(CFLAGS) $(addprefix $(OBJ_DIR)/,$(OBJS_CLIENT)) -o $@ $(LDFLAGS)
+run-pacmanist: pacmanist
+	./$(BIN_DIR)/$(PACMANIST) levels 1 reg_fifo
 
-# dont include LDFLAGS in the end, to allow compilation on macos
-%.o: %.c $($@) | folders
-	$(CC) -I $(INCLUDE_DIR) $(CFLAGS) -o $(OBJ_DIR)/$@ -c $<
+run-client: client
+	./$(BIN_DIR)/$(CLIENT) 1 reg_fifo
 
-# Create folders
-folders:
-	mkdir -p $(OBJ_DIR)
-	mkdir -p $(BIN_DIR)
-
-# Clean object files and executable
+# ========== Clean ==========
 clean:
-	rm -f $(OBJ_DIR)/*.o
-	rm -f $(BIN_DIR)/$(TARGET)
-	rm -f $(BIN_DIR)/$(CLIENT)
+	rm -rf $(OBJ_DIR) $(BIN_DIR) *.log *.fifo
 
-# indentify targets that do not create files
-.PHONY: all clean run folders
+.PHONY: all clean pacmanist client run-pacmanist run-client

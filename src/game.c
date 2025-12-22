@@ -1,5 +1,6 @@
 #include "board.h"
 #include "display.h"
+#include "debug.h"
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
