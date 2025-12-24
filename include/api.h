@@ -11,6 +11,8 @@ typedef struct {
   char* data;
 } Board;
 
+
+
 int pacman_connect(char const *req_pipe_path, char const *notif_pipe_path, char const *server_pipe_path);
 
 void pacman_play(char command);

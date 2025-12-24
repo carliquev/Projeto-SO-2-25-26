@@ -55,6 +55,7 @@ int main(int argc, char *argv[]) {
     const char *register_pipe = argv[2];
     const char *commands_file = (argc == 4) ? argv[3] : NULL;
 
+
     FILE *cmd_fp = NULL;
     if (commands_file) {
         cmd_fp = fopen(commands_file, "r");
@@ -133,6 +134,7 @@ int main(int argc, char *argv[]) {
             continue;
 
         if (command == 'Q') {
+            pacman_disconnect();
             debug("Client pressed 'Q', quitting game\n");
             break;
         }

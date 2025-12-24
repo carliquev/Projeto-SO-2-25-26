@@ -1,0 +1,20 @@
+#Demonstra o Pacman manual (pelo input do utilizador)
+# DIM: dimensões da matriz do nível
+DIM 15 10
+# TEMPO: indica a duração de cada jogada em milissegundos
+TEMPO 300
+# MON: indica os nomes dos ficheiros de monstros usados neste nível
+MON 6.m 7.m
+# o ficheiro termina com o conteúdo da matriz de jogo em que "X"
+# representa uma parede, "o" representa um espaço de circulação
+# e “@” representa o portal
+XXXXXXXXXXXXXXX
+XoooooooooooooX
+XoooooooooooooX
+XoooooooooooooX
+XoooooooooooooX
+XoooooooooooooX
+XoooooooooooooX
+XoooooooooooooX
+Xoooooooooooo@X
+XXXXXXXXXXXXXXX
