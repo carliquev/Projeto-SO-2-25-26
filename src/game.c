@@ -500,7 +500,7 @@ void* session_thread(void *arg) {
 void* host_thread(void *arg) {
     host_thread_arg_t *host_arg = (host_thread_arg_t*) arg;
     int *reg_rx = host_arg->rx;
-    int max_games = host_arg->max_games;
+    // int max_games = host_arg->max_games;
 
     int result = 0;
 

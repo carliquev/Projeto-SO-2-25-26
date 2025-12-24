@@ -73,7 +73,7 @@ int pacman_connect(char const *req_pipe_path, char const *notif_pipe_path, char 
   }
   strcpy(session.notif_pipe_path, notif_pipe_path);
   char notif_reader[2];
-  int notif_read = 0;
+  ssize_t notif_read = 0;
   while (notif_read == 0) {
     notif_read = read(session.notif_pipe, notif_reader, 2);
   }
@@ -82,10 +82,10 @@ int pacman_connect(char const *req_pipe_path, char const *notif_pipe_path, char 
     perror("[ERR]: read failed");
     exit(EXIT_FAILURE);
   }
-  if (strcmp(notif_reader, "11") == 0) {
-     exit(EXIT_FAILURE);
-  }
-  if (strcmp(notif_reader, "10") == 0) {
+  if (notif_reader[0]=='1') {
+    if (notif_reader[1]!='1') {
+      exit(EXIT_FAILURE);
+    }
     if (mkfifo(req_pipe_path, 0640) != 0) {
       perror("[ERR]: mkfifo failed");
       exit(EXIT_FAILURE);
@@ -97,56 +97,62 @@ int pacman_connect(char const *req_pipe_path, char const *notif_pipe_path, char 
     }
     strcpy(session.req_pipe_path, req_pipe_path);
   }
+
   return(0);
-
-  /*if (unlink(FIFO_PATHNAME) != 0 && errno != ENOENT) {
-    perror("[ERR]: unlink(%s) failed");
-    exit(EXIT_FAILURE);
-  }
-
-  * create pipe *
-  if (mkfifo(FIFO_PATHNAME, 0640) != 0) {
-    perror("[ERR]: mkfifo failed");
-    exit(EXIT_FAILURE);
-  }
-
-  **
-   * open pipe for writing
-   * this waits for someone to open it for reading
-   *
-  int tx = open(FIFO_PATHNAME, O_WRONLY);
-  if (tx == -1) {
-    perror("[ERR]: open failed");
-    exit(EXIT_FAILURE);
-  }*/
-  // TODO - implement me
 }
 
 void pacman_play(char command) {
-
-  // TODO - implement me
-
+  ssize_t notif_write;
+  char buffer[3];
+  int op_code = 3;
+  snprintf(buffer, 3, "%d%c", op_code, command);
+  notif_write = write(session.req_pipe, buffer, 1);
+  if (notif_write < 0) {
+    perror("[ERR]: write failed");
+    exit(EXIT_FAILURE);
+  }
+  close(session.req_pipe);
+  close(session.notif_pipe);
 }
 
 int pacman_disconnect() {
-  char *notif_reader;
-  int notif_read = 0;
-  while (notif_read == 0) {
-    notif_read = read(session.notif_pipe, notif_reader, 1);
-  }
-  if (notif_read == -1) {
-    //fprintf(stderr, "[ERR]: read failed: %s\n", strerror(errno));
-    perror("[ERR]: read failed");
+  ssize_t notif_write;
+  notif_write = write(session.req_pipe, "2", 1);
+  if (notif_write < 0) {
+    perror("[ERR]: write failed");
     return -1;
   }
-  if (strcmp(notif_reader, "2") == 0) {
-    close(session.req_pipe);
-    close(session.notif_pipe);
-  }
-  // TODO - implement me
+  close(session.req_pipe);
+  close(session.notif_pipe);
   return 0;
 }
 
-Board receive_board_update(void) {
-    // TODO - implement me
+Board receive_board_update() {
+  ssize_t notif_read = 0;
+  msg_board_update_t msg_board;
+  msg_board.op_code = 0;
+  Board game_board;
+
+  while (msg_board.op_code !=4) {
+    notif_read = read(session.notif_pipe, &msg_board, sizeof(msg_board_update_t));
+    if (notif_read == -1) {
+      perror("[ERR]: read failed");
+      exit(EXIT_FAILURE);
+    }
+
+    if (msg_board.op_code!=4) continue;
+
+
+    game_board.width = msg_board.width;
+    game_board.height = msg_board.height;
+    game_board.tempo = msg_board.tempo;
+    game_board.victory = msg_board.victory;
+    game_board.game_over = msg_board.game_over;
+    game_board.accumulated_points = msg_board.points;
+    game_board.data = malloc((game_board.width*game_board.height)*sizeof(char));
+    strcpy(game_board.data, msg_board.data);
+
+    return game_board;
+  }
+  exit(EXIT_FAILURE);
 }
