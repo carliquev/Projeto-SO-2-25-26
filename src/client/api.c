@@ -1,4 +1,7 @@
 #include "api.h"
+
+#include <errno.h>
+
 #include "protocol.h"
 #include "debug.h"
 
@@ -46,10 +49,6 @@ int pacman_connect(char const *req_pipe_path, char const *notif_pipe_path, char 
   strcpy(msg_registration.req_pipe_path, req_pipe_path);
   strcpy(msg_registration.notif_pipe_path, notif_pipe_path);
 
-  if (mkfifo(server_pipe_path, 0640) != 0) {
-    perror("[ERR]: mkfifo failed");
-    exit(EXIT_FAILURE);
-  }
   int server = open(server_pipe_path, O_WRONLY);
   if (server == -1) {
     perror("[ERR]: open failed");
@@ -60,7 +59,12 @@ int pacman_connect(char const *req_pipe_path, char const *notif_pipe_path, char 
     perror("[ERR]: write failed");
     exit(EXIT_FAILURE);
   }
-  close(server);
+
+  /* remove pipe if it exists */
+  if (unlink(notif_pipe_path) != 0 && errno != ENOENT) {
+    perror("[ERR]: unlink(%s) failed");
+    exit(EXIT_FAILURE);
+  }
 
   if (mkfifo(notif_pipe_path, 0640) != 0) {
     perror("[ERR]: mkfifo failed");
@@ -84,6 +88,11 @@ int pacman_connect(char const *req_pipe_path, char const *notif_pipe_path, char 
   }
   if (notif_reader[0]=='1') {
     if (notif_reader[1]!='1') {
+      exit(EXIT_FAILURE);
+    }
+    /* remove pipe if it exists */
+    if (unlink(notif_pipe_path) != 0 && errno != ENOENT) {
+      perror("[ERR]: unlink(%s) failed");
       exit(EXIT_FAILURE);
     }
     if (mkfifo(req_pipe_path, 0640) != 0) {
