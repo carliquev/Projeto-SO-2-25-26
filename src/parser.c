@@ -139,7 +139,7 @@ int read_pacman(board_t* board, int points) {
     pacman->points = points;
 
     // no file was provided -> defaults 
-    if (board->pacman_file[0] == '\0') {
+    // if (board->pacman_file[0] == '\0') {
         pacman->passo = 0;
         pacman->waiting = 0;
         pacman->n_moves = 0; // user controlled
@@ -158,83 +158,83 @@ int read_pacman(board_t* board, int points) {
 
         pacman_inserted:
         return 0;
-    }
+    // }
 
-    int fd = open(board->pacman_file, O_RDONLY);
-
-    int read;
-    char command[MAX_COMMAND_LENGTH];
-    while ((read = read_line(fd, command)) > 0) {
-        // comment
-        if (command[0] == '#' || command[0] == '\0') continue;
-
-        char *word = strtok(command, " \t\n");
-        if (!word) continue;  // skip empty line
-
-        if (strcmp(word, "PASSO") == 0) {
-            char *arg = strtok(NULL, " \t\n");
-            if (arg) {
-                pacman->passo = atoi(arg);
-                pacman->waiting = pacman->passo;
-                debug("Pacman passo: %d\n", pacman->passo);
-            }
-        }
-        else if (strcmp(word, "POS") == 0) {
-            char *arg1 = strtok(NULL, " \t\n");
-            char *arg2 = strtok(NULL, " \t\n");
-            if (arg1 && arg2) {
-                pacman->pos_x = atoi(arg1);
-                pacman->pos_y = atoi(arg2);
-                int idx = pacman->pos_y * board->width + pacman->pos_x;
-                board->board[idx].content = 'P';
-                debug("Pacman Pos = %d x %d\n", pacman->pos_x, pacman->pos_y);
-            }
-        }
-        else {
-            break;
-        }
-    }
-
-    // end of the file contains the moves
-    pacman->current_move = 0;
-    
-    // command here still holds the previous line
-    int move = 0;
-    while (read > 0 && move < MAX_MOVES) {
-        if (command[0]== '#' || command[0] == '\0') continue;
-        if (command[0] == 'A' ||
-            command[0] == 'D' ||
-            command[0] == 'W' ||
-            command[0] == 'S' ||
-            command[0] == 'R' ||
-            command[0] == 'G' ||  // FIXME: so para testar
-            command[0] == 'Q') {  // FIXME: so para testar
-                pacman->moves[move].command = command[0];
-                pacman->moves[move].turns = 1;
-                move += 1;
-        }
-        else if (command[0] == 'T' && command[1] == ' ') { 
-            int t = atoi(command+2);
-            if (t > 0) {
-                pacman->moves[move].command = command[0];
-                pacman->moves[move].turns = t;
-                pacman->moves[move].turns_left = t;
-                move += 1;
-            }
-        }
-
-        read = read_line(fd, command);
-    }
-    pacman->n_moves = move;
-
-    if (read == -1) {
-        debug("Failed reading line\n");
-        close(fd);
-        return -1;
-    }
-
-    close(fd);
-    return 0;
+    // int fd = open(board->pacman_file, O_RDONLY);
+    //
+    // int read;
+    // char command[MAX_COMMAND_LENGTH];
+    // while ((read = read_line(fd, command)) > 0) {
+    //     // comment
+    //     if (command[0] == '#' || command[0] == '\0') continue;
+    //
+    //     char *word = strtok(command, " \t\n");
+    //     if (!word) continue;  // skip empty line
+    //
+    //     if (strcmp(word, "PASSO") == 0) {
+    //         char *arg = strtok(NULL, " \t\n");
+    //         if (arg) {
+    //             pacman->passo = atoi(arg);
+    //             pacman->waiting = pacman->passo;
+    //             debug("Pacman passo: %d\n", pacman->passo);
+    //         }
+    //     }
+    //     else if (strcmp(word, "POS") == 0) {
+    //         char *arg1 = strtok(NULL, " \t\n");
+    //         char *arg2 = strtok(NULL, " \t\n");
+    //         if (arg1 && arg2) {
+    //             pacman->pos_x = atoi(arg1);
+    //             pacman->pos_y = atoi(arg2);
+    //             int idx = pacman->pos_y * board->width + pacman->pos_x;
+    //             board->board[idx].content = 'P';
+    //             debug("Pacman Pos = %d x %d\n", pacman->pos_x, pacman->pos_y);
+    //         }
+    //     }
+    //     else {
+    //         break;
+    //     }
+    // }
+    //
+    // // end of the file contains the moves
+    // pacman->current_move = 0;
+    //
+    // // command here still holds the previous line
+    // int move = 0;
+    // while (read > 0 && move < MAX_MOVES) {
+    //     if (command[0]== '#' || command[0] == '\0') continue;
+    //     if (command[0] == 'A' ||
+    //         command[0] == 'D' ||
+    //         command[0] == 'W' ||
+    //         command[0] == 'S' ||
+    //         command[0] == 'R' ||
+    //         command[0] == 'G' ||  // FIXME: so para testar
+    //         command[0] == 'Q') {  // FIXME: so para testar
+    //             pacman->moves[move].command = command[0];
+    //             pacman->moves[move].turns = 1;
+    //             move += 1;
+    //     }
+    //     else if (command[0] == 'T' && command[1] == ' ') {
+    //         int t = atoi(command+2);
+    //         if (t > 0) {
+    //             pacman->moves[move].command = command[0];
+    //             pacman->moves[move].turns = t;
+    //             pacman->moves[move].turns_left = t;
+    //             move += 1;
+    //         }
+    //     }
+    //
+    //     read = read_line(fd, command);
+    // }
+    // pacman->n_moves = move;
+    //
+    // if (read == -1) {
+    //     debug("Failed reading line\n");
+    //     close(fd);
+    //     return -1;
+    // }
+    //
+    // close(fd);
+    // return 0;
 }
 
 

@@ -134,7 +134,6 @@ int main(int argc, char *argv[]) {
             continue;
 
         if (command == 'Q') {
-            pacman_disconnect();
             debug("Client pressed 'Q', quitting game\n");
             break;
         }

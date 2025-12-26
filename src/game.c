@@ -20,6 +20,7 @@
 #define LOAD_BACKUP 3
 #define CREATE_BACKUP 4
 
+#define DEFAULT 0
 #define VICTORY 1
 #define GAMEOVER 2
 #define VICTORY_AND_GAMEOVER 3
@@ -100,30 +101,30 @@ void board_to_char(board_t *board, char** char_board) {
 
             switch (c) {
                 case 'W': // Wall
-                    *char_board[idx] = '#';
+                    (*char_board)[idx] = '#';
                     break;
 
                 case 'P': // Pacman
-                    *char_board[idx] = 'C';
+                    (*char_board)[idx] = 'C';
                     break;
 
                 case 'M': // Monster/Ghost
                     if (ghost_charged) {
-                        *char_board[idx] = 'G'; // Charged Monster/Ghost
+                        (*char_board)[idx] = 'G'; // Charged Monster/Ghost
                     } else {
-                        *char_board[idx] = 'M';
+                        (*char_board)[idx] = 'M';
                     }
                     break;
 
                 case ' ': // Empty space
                     if (board->board[idx].has_portal) {
-                        *char_board[idx] = '@';
+                        (*char_board)[idx] = '@';
                     }
                     else if (board->board[idx].has_dot) {
-                        *char_board[idx] = '.';
+                        (*char_board)[idx] = '.';
                     }
                     else
-                        *char_board[idx] = ' ';
+                        (*char_board)[idx] = ' ';
                     break;
 
                 default:
@@ -135,7 +136,7 @@ void board_to_char(board_t *board, char** char_board) {
 
 int create_backup() {
     // clear the terminal for process transition
-    terminal_cleanup();
+    // terminal_cleanup();
 
     pid_t child = fork();
 
@@ -193,9 +194,8 @@ void update_client(int notif_pipe_fd, board_t *game_board, int mode) {
     msg.game_over = game_over;
     msg.points = game_board->pacmans[0].points;
 
-    char *char_board = malloc((game_board->width * game_board->height) * sizeof(char));
-    board_to_char(game_board, &char_board);
-    msg.data = char_board;
+    msg.data = malloc((game_board->width * game_board->height) * sizeof(char));
+    board_to_char(game_board, &(msg.data));
 
     ssize_t bytes = write(notif_pipe_fd, &msg, sizeof(msg_board_update_t));
     if (bytes < 0) {
@@ -216,8 +216,8 @@ void* ncurses_thread(void *arg) {
             pthread_rwlock_unlock(&board->state_lock);
             pthread_exit(NULL);
         }
-        screen_refresh(board, DRAW_MENU);
-        update_client(ncurses_thread_arg->notif_tx, board, 0);
+        // screen_refresh(board, DRAW_MENU);
+        // update_client(ncurses_thread_arg->notif_tx, board, 0);
         pthread_rwlock_unlock(&board->state_lock);
     }
 }
@@ -242,12 +242,20 @@ void* pacman_thread(void *arg) {
         command_t* play;
         command_t c;
         char client_play_buffer[CLIENT_PLAY_SIZE];
-        ssize_t ret = read(req_rx, client_play_buffer, CLIENT_PLAY_SIZE);
-        if (ret == -1) {
-            // ret == -1 indicates error
-            fprintf(stderr, "[ERR]: read failed: %s\n", strerror(errno));
-            exit(EXIT_FAILURE);
+        while (true) {
+            ssize_t ret = read(req_rx, client_play_buffer, CLIENT_PLAY_SIZE);
+            if (ret == -1) {
+                // ret == -1 indicates error
+                fprintf(stderr, "[ERR]: read failed: %s\n", strerror(errno));
+                exit(EXIT_FAILURE);
+            }
+            if (ret == 0) {
+                sleep_ms(100);
+                continue;
+            }
+            break;
         }
+
 
         c.command = client_play_buffer[1];
 
@@ -335,14 +343,14 @@ void* session_thread(void *arg) {
 
     open_debug_file("debug.log");
 
-    terminal_init();
+    // terminal_init();
 
     board_t game_board;
     int accumulated_points = 0;
     bool end_game = false;
 
 
-    pid_t parent_process = getpid(); // Only the parent process can create backups
+    // pid_t parent_process = getpid(); // Only the parent process can create backups
 
     struct dirent* entry;
     while ((entry = readdir(level_dir)) != NULL && !end_game) {
@@ -353,8 +361,9 @@ void* session_thread(void *arg) {
 
         if (strcmp(dot, ".lvl") == 0) {
             load_level(&game_board, entry->d_name, directory_name, accumulated_points);
-            draw_board(&game_board, DRAW_MENU);
-            refresh_screen();
+            update_client(notif_tx, &game_board, DEFAULT);
+            // draw_board(&game_board, DRAW_MENU);
+            // refresh_screen();
 
             while(true) {
                 pthread_t ncurses_tid, pacman_tid;
@@ -397,83 +406,83 @@ void* session_thread(void *arg) {
                 free(retval);
 
                 if(result == NEXT_LEVEL) {
-                    screen_refresh(&game_board, DRAW_WIN);
+                    // screen_refresh(&game_board, DRAW_WIN);
                     update_client(notif_tx, &game_board, VICTORY);
                     sleep_ms(game_board.tempo);
                     break;
                 }
 
-                if(result == CREATE_BACKUP) {
-                    debug("CREATE_BACKUP\n");
-                    if (parent_process == getpid()) {
-                        debug("PARENT\n");
-                        pid_t child = create_backup();
-                        if (child == -1) {
-                            // failed to fork
-                            debug("[%d] Failed to create backup\n", getpid());
-                            end_game = true;
-                            break;
-                        }
-                        if (child > 0) {
-                            debug("Parent process\n");
-                            int status;
-                            wait(&status);
+                // if(result == CREATE_BACKUP) {
+                //     debug("CREATE_BACKUP\n");
+                //     if (parent_process == getpid()) {
+                //         debug("PARENT\n");
+                //         pid_t child = create_backup();
+                //         if (child == -1) {
+                //             // failed to fork
+                //             debug("[%d] Failed to create backup\n", getpid());
+                //             end_game = true;
+                //             break;
+                //         }
+                //         if (child > 0) {
+                //             debug("Parent process\n");
+                //             int status;
+                //             wait(&status);
+                //
+                //             if (WIFEXITED(status)) {
+                //                 int code = WEXITSTATUS(status);
+                //
+                //                 if (code == 1) {
+                //                     terminal_init();
+                //                     debug("[%d] Save Resuming...\n", getpid());
+                //                 }
+                //                 else { // End game or error
+                //                     end_game = true;
+                //                     break;
+                //                 }
+                //             }
+                //         } else {
+                //             terminal_init();
+                //             debug("Child process\n");
+                //         }
+                //
+                //     } else {
+                //         debug("[%d] Only parent process can have a save\n", getpid());
+                //     }
+                // }
 
-                            if (WIFEXITED(status)) {
-                                int code = WEXITSTATUS(status);
-
-                                if (code == 1) {
-                                    terminal_init();
-                                    debug("[%d] Save Resuming...\n", getpid());
-                                }
-                                else { // End game or error
-                                    end_game = true;
-                                    break;
-                                }
-                            }
-                        } else {
-                            terminal_init();
-                            debug("Child process\n");
-                        }
-
-                    } else {
-                        debug("[%d] Only parent process can have a save\n", getpid());
-                    }
-                }
-
-                if(result == LOAD_BACKUP) {
-                    if(getpid() != parent_process) {
-                        terminal_cleanup();
-                        unload_level(&game_board);
-
-                        close_debug_file();
-
-                        if (closedir(level_dir) == -1) {
-                            fprintf(stderr, "Failed to close directory\n");
-                            exit(EXIT_FAILURE);
-                        }
-
-                        return NULL;
-                    } else {
-                        // No backup process, game over
-                        result = QUIT_GAME;
-                    }
-                }
+                // if(result == LOAD_BACKUP) {
+                //     if(getpid() != parent_process) {
+                //         terminal_cleanup();
+                //         unload_level(&game_board);
+                //
+                //         close_debug_file();
+                //
+                //         if (closedir(level_dir) == -1) {
+                //             fprintf(stderr, "Failed to close directory\n");
+                //             exit(EXIT_FAILURE);
+                //         }
+                //
+                //         return NULL;
+                //     } else {
+                //         // No backup process, game over
+                //         result = QUIT_GAME;
+                //     }
+                // }
 
                 if(result == QUIT_GAME) {
-                    screen_refresh(&game_board, DRAW_GAME_OVER);
+                    // screen_refresh(&game_board, DRAW_GAME_OVER);
                     update_client(notif_tx, &game_board, GAMEOVER);
                     sleep_ms(game_board.tempo);
                     end_game = true;
                     break;
                 }
 
-                screen_refresh(&game_board, DRAW_MENU);
-                update_client(notif_tx, &game_board, 0);
+                // screen_refresh(&game_board, DRAW_MENU);
+                update_client(notif_tx, &game_board, DEFAULT);
 
                 accumulated_points = game_board.pacmans[0].points;
             }
-            print_board(&game_board);
+            // print_board(&game_board);
             if (game_board.pacmans[0].alive) {
                 update_client(notif_tx, &game_board, VICTORY_AND_GAMEOVER);
             }
@@ -482,7 +491,7 @@ void* session_thread(void *arg) {
         }
     }
 
-    terminal_cleanup();
+    // terminal_cleanup();
 
     close_debug_file();
 
@@ -512,6 +521,7 @@ void* host_thread(void *arg) {
             fprintf(stderr, "[ERR]: read failed: %s\n", strerror(errno));
             result = 1;
         } else if (ret==0) {
+            sleep_ms(100);
             continue;
         }
 
@@ -537,6 +547,7 @@ void* host_thread(void *arg) {
         snprintf(response, sizeof(response), "%d%d", msg_reg.op_code, result);
         send_msg(notif_tx, response);
         pthread_create(&session_tid, NULL, session_thread, (void*) s_arg);
+        pthread_join(session_tid, NULL);
     }
     return NULL;
 }
@@ -579,7 +590,7 @@ int main(int argc, char** argv) {
     arg->max_games = max_games;
     strcpy(arg->directory_name, argv[1]);
     pthread_create(&host_tid, NULL, host_thread, (void*) arg);
-
+    pthread_join(host_tid, NULL);
 
     return 0;
 }

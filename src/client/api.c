@@ -48,15 +48,33 @@ int pacman_connect(char const *req_pipe_path, char const *notif_pipe_path, char 
   msg_registration.op_code = 1;
   strcpy(msg_registration.req_pipe_path, req_pipe_path);
   strcpy(msg_registration.notif_pipe_path, notif_pipe_path);
+  int server;
 
-  int server = open(server_pipe_path, O_WRONLY);
-  if (server == -1) {
+  while (1) {
+    server = open(server_pipe_path, O_WRONLY);
+    if (server >= 0) break;
+
+    if (errno == ENOENT) {  // não existe ainda, ou não há reader
+      sleep_ms(100);
+      continue;
+    }
     perror("[ERR]: open failed");
-    exit(EXIT_FAILURE);
+    return -1;
   }
+
   ssize_t server_write = write(server, &msg_registration, sizeof(msg_registration));
   if (server_write < 0) {
     perror("[ERR]: write failed");
+    exit(EXIT_FAILURE);
+  }
+
+  /* remove pipe if it exists */
+  if (unlink(req_pipe_path) != 0 && errno != ENOENT) {
+    perror("[ERR]: unlink(%s) failed");
+    exit(EXIT_FAILURE);
+  }
+  if (mkfifo(req_pipe_path, 0640) != 0) {
+    perror("[ERR]: mkfifo failed");
     exit(EXIT_FAILURE);
   }
 
@@ -70,40 +88,34 @@ int pacman_connect(char const *req_pipe_path, char const *notif_pipe_path, char 
     perror("[ERR]: mkfifo failed");
     exit(EXIT_FAILURE);
   }
+
+  session.req_pipe = open(req_pipe_path, O_WRONLY);
+  if (session.req_pipe == -1) {
+    perror("[ERR]: open failed");
+    exit(EXIT_FAILURE);
+  }
+
   session.notif_pipe = open(notif_pipe_path, O_RDONLY);
   if (session.notif_pipe == -1) {
     perror("[ERR]: open failed");
     exit(EXIT_FAILURE);
   }
+
   strcpy(session.notif_pipe_path, notif_pipe_path);
   char notif_reader[2];
   ssize_t notif_read = 0;
-  while (notif_read == 0) {
-    notif_read = read(session.notif_pipe, notif_reader, 2);
-  }
+  notif_read = read(session.notif_pipe, notif_reader, 2);
+
   if (notif_read == -1) {
     //fprintf(stderr, "[ERR]: read failed: %s\n", strerror(errno));
     perror("[ERR]: read failed");
     exit(EXIT_FAILURE);
   }
   if (notif_reader[0]=='1') {
-    if (notif_reader[1]!='1') {
+    if (notif_reader[1]=='1') {
       exit(EXIT_FAILURE);
     }
-    /* remove pipe if it exists */
-    if (unlink(notif_pipe_path) != 0 && errno != ENOENT) {
-      perror("[ERR]: unlink(%s) failed");
-      exit(EXIT_FAILURE);
-    }
-    if (mkfifo(req_pipe_path, 0640) != 0) {
-      perror("[ERR]: mkfifo failed");
-      exit(EXIT_FAILURE);
-    }
-    session.req_pipe = open(req_pipe_path, O_RDONLY);
-    if (session.req_pipe == -1) {
-      perror("[ERR]: open failed");
-      exit(EXIT_FAILURE);
-    }
+
     strcpy(session.req_pipe_path, req_pipe_path);
   }
 
@@ -115,13 +127,11 @@ void pacman_play(char command) {
   char buffer[3];
   int op_code = 3;
   snprintf(buffer, 3, "%d%c", op_code, command);
-  notif_write = write(session.req_pipe, buffer, 1);
+  notif_write = write(session.req_pipe, buffer, 3);
   if (notif_write < 0) {
     perror("[ERR]: write failed");
     exit(EXIT_FAILURE);
   }
-  close(session.req_pipe);
-  close(session.notif_pipe);
 }
 
 int pacman_disconnect() {
