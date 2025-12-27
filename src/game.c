@@ -74,7 +74,6 @@ typedef struct {
     int victory;
     int game_over;
     int points;
-    char *data;
 }msg_board_update_t;
 
 sem_t semaforo_clientes;
@@ -194,14 +193,15 @@ void update_client(int notif_pipe_fd, board_t *game_board, int mode) {
     msg.game_over = game_over;
     msg.points = game_board->pacmans[0].points;
 
-    msg.data = malloc((game_board->width * game_board->height) * sizeof(char));
-    board_to_char(game_board, &(msg.data));
+    char *board_data = malloc((game_board->width * game_board->height) * sizeof(char));
+    board_to_char(game_board, &board_data);
 
     ssize_t bytes = write(notif_pipe_fd, &msg, sizeof(msg_board_update_t));
     if (bytes < 0) {
         fprintf(stderr, "[ERR]: write failed\n");
         exit(EXIT_FAILURE);
     }
+    send_msg(notif_pipe_fd, board_data);
 }
 
 void* ncurses_thread(void *arg) {

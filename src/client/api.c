@@ -35,7 +35,6 @@ typedef struct {
   int victory;
   int game_over;
   int points;
-  char *data;
 } msg_board_update_t;
 
 
@@ -124,10 +123,10 @@ int pacman_connect(char const *req_pipe_path, char const *notif_pipe_path, char 
 
 void pacman_play(char command) {
   ssize_t notif_write;
-  char buffer[3];
-  int op_code = 3;
-  snprintf(buffer, 3, "%d%c", op_code, command);
-  notif_write = write(session.req_pipe, buffer, 3);
+  char buffer[2];
+  buffer[0] = '3'; //op_code
+  buffer[1] = command;
+  notif_write = write(session.req_pipe, buffer, sizeof(buffer));
   if (notif_write < 0) {
     perror("[ERR]: write failed");
     exit(EXIT_FAILURE);
@@ -164,13 +163,19 @@ Board receive_board_update() {
 
     game_board.width = msg_board.width;
     game_board.height = msg_board.height;
+    int board_dim = game_board.width * game_board.height;
     game_board.tempo = msg_board.tempo;
     game_board.victory = msg_board.victory;
     game_board.game_over = msg_board.game_over;
     game_board.accumulated_points = msg_board.points;
-    game_board.data = malloc((game_board.width*game_board.height)*sizeof(char));
-    strcpy(game_board.data, msg_board.data);
+    game_board.data = malloc((board_dim)*sizeof(char));
 
+    notif_read = read(session.notif_pipe, game_board.data, board_dim);
+    if (notif_read == -1) {
+      //fprintf(stderr, "[ERR]: read failed: %s\n", strerror(errno));
+      perror("[ERR]: read failed");
+      exit(EXIT_FAILURE);
+    }
     return game_board;
   }
   exit(EXIT_FAILURE);
