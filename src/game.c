@@ -450,24 +450,24 @@ void* session_thread(void *arg) {
                 //     }
                 // }
 
-                // if(result == LOAD_BACKUP) {
-                //     if(getpid() != parent_process) {
-                //         terminal_cleanup();
-                //         unload_level(&game_board);
-                //
-                //         close_debug_file();
-                //
-                //         if (closedir(level_dir) == -1) {
-                //             fprintf(stderr, "Failed to close directory\n");
-                //             exit(EXIT_FAILURE);
-                //         }
-                //
-                //         return NULL;
-                //     } else {
-                //         // No backup process, game over
-                //         result = QUIT_GAME;
-                //     }
-                // }
+                if(result == LOAD_BACKUP) {
+                    // if(getpid() != parent_process) {
+                    //     terminal_cleanup();
+                    //     unload_level(&game_board);
+                    //
+                    //     close_debug_file();
+                    //
+                    //     if (closedir(level_dir) == -1) {
+                    //         fprintf(stderr, "Failed to close directory\n");
+                    //         exit(EXIT_FAILURE);
+                    //     }
+                    //
+                    //     return NULL;
+                    // } else {
+                        // No backup process, game over
+                        result = QUIT_GAME;
+                    // }
+                }
 
                 if(result == QUIT_GAME) {
                     // screen_refresh(&game_board, DRAW_GAME_OVER);
