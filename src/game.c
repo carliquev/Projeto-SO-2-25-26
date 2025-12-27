@@ -13,6 +13,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <semaphore.h>
+#include <signal.h>
 
 #define CONTINUE_PLAY 0
 #define NEXT_LEVEL 1
@@ -253,6 +254,11 @@ void* pacman_thread(void *arg) {
         char client_play_buffer[CLIENT_PLAY_SIZE];
 
         ssize_t ret = read(req_rx, client_play_buffer, CLIENT_PLAY_SIZE);
+        //EOF
+        if (ret == 0) {
+            board->state = QUIT_GAME;
+            pthread_exit(NULL);
+        }
         if (ret == -1) {
             // ret == -1 indicates error
             fprintf(stderr, "[ERR]: read failed: %s\n", strerror(errno));
@@ -446,29 +452,34 @@ void* session_thread(void *arg) {
     // Se já não há mais níveis
     board_t end_board;
     update_client(notif_tx, &end_board, ENDGAME);
-    char disconnect_message;
+    while (true) {
+        char m;
+        ssize_t r = read(req_rx, &m, 1);
 
-    ssize_t ret = read(req_rx, &disconnect_message, 1);
-    if (ret != 1 && disconnect_message != '2') {
-        fprintf(stderr, "[ERR]: client not disconnecting correctly\n");
-        exit(EXIT_FAILURE);
+        if (r == 1) {
+            if (m == '2') break;
+            continue;
+        }
+        if (r == 0) {
+            break;
+        }
+        if (errno == EINTR) continue;
+        perror("[ERR]: read disconnect failed");
+        break;
     }
     close(req_rx);
     close(notif_tx);
-
     if (closedir(level_dir) == -1) {
         fprintf(stderr, "Failed to close directory\n");
         exit(EXIT_FAILURE);
     }
-
+    sem_post(&semaforo_clientes);
     return NULL;
 }
 
 void* host_thread(void *arg) {
     host_thread_arg_t *host_arg = (host_thread_arg_t*) arg;
     int *reg_rx = host_arg->rx;
-    // int max_games = host_arg->max_games;
-
     int result = 0;
 
     while (true) {
@@ -483,6 +494,7 @@ void* host_thread(void *arg) {
             continue;
         }
 
+        sem_wait(&semaforo_clientes);
         int req_rx = open(msg_reg.req_pipe_path, O_RDONLY);
         if (req_rx == -1) {
             perror("[ERR]: req_pipe open failed");
@@ -505,7 +517,7 @@ void* host_thread(void *arg) {
         snprintf(response, sizeof(response), "%d%d", msg_reg.op_code, result);
         send_msg(notif_tx, response, REQUEST_RESPONSE);
         pthread_create(&session_tid, NULL, session_thread, (void*) s_arg);
-        pthread_join(session_tid, NULL);
+        // pthread_join(session_tid, NULL);
     }
     return NULL;
 }
@@ -517,6 +529,8 @@ int main(int argc, char** argv) {
         printf("Usage: %s <level_directory> <max_games> <nome_do_FIFO_de_registo>\n", argv[0]);
         return -1;
     }
+    //SIGPIPE não fecha o programa
+    // signal(SIGPIPE, SIG_IGN);
 
     int max_games = atoi(argv[2]);
     // Inicializa semaforo

@@ -85,6 +85,7 @@ int main(int argc, char *argv[]) {
     pthread_create(&receiver_thread_id, NULL, receiver_thread, NULL);
 
     terminal_init();
+    atexit(terminal_cleanup);
     set_timeout(500);
     draw_board_client(board);
     refresh_screen();
@@ -127,6 +128,7 @@ int main(int argc, char *argv[]) {
         } else {
             pthread_mutex_lock(&mutex);
             if (stop_execution) {
+                pthread_mutex_unlock(&mutex);
                 break;
             }
             pthread_mutex_unlock(&mutex);
@@ -143,6 +145,7 @@ int main(int argc, char *argv[]) {
 
         pthread_mutex_lock(&mutex);
         if (stop_execution) {
+            pthread_mutex_unlock(&mutex);
             break;
         }
         pthread_mutex_unlock(&mutex);

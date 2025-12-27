@@ -6,7 +6,7 @@ TEMPO 500
 # PAC: (opcional) indica o nome do ficheiro do pacman deste nível
 #PAC 2.p
 # MON: indica os nomes dos ficheiros de monstros usados neste nível
-MON 4.m
+MON
 # o ficheiro termina com o conteúdo da matriz de jogo em que "X"
 # representa uma parede, "o" representa um espaço de circulação
 # e “@” representa o portal
