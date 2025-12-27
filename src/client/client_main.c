@@ -144,7 +144,6 @@ int main(int argc, char *argv[]) {
 
     }
 
-    pacman_disconnect();
 
     pthread_join(receiver_thread_id, NULL);
 
@@ -153,6 +152,7 @@ int main(int argc, char *argv[]) {
 
     pthread_mutex_destroy(&mutex);
 
+    pacman_disconnect();
     terminal_cleanup();
 
     return 0;

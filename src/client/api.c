@@ -134,9 +134,9 @@ void pacman_play(char command) {
 }
 
 int pacman_disconnect() {
-  ssize_t notif_write;
-  notif_write = write(session.req_pipe, "2", 1);
-  if (notif_write < 0) {
+  ssize_t req_write;
+  req_write = write(session.req_pipe, "2", 1);
+  if (req_write < 0) {
     perror("[ERR]: write failed");
     return -1;
   }

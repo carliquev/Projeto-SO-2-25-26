@@ -217,7 +217,7 @@ void* ncurses_thread(void *arg) {
             pthread_exit(NULL);
         }
         // screen_refresh(board, DRAW_MENU);
-        // update_client(ncurses_thread_arg->notif_tx, board, 0);
+        update_client(ncurses_thread_arg->notif_tx, board, DEFAULT);
         pthread_rwlock_unlock(&board->state_lock);
     }
 }
