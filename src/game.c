@@ -52,7 +52,6 @@ typedef struct {
 
 typedef struct {
     int *rx;
-    int max_games;
     char directory_name[MAX_FILENAME];
 } host_thread_arg_t;
 
@@ -167,7 +166,8 @@ void send_msg(int fd, char const *str, ssize_t len) {
         ssize_t ret = write(fd, str + written, len - written);
         if (ret < 0) {
             perror("[ERR]: write failed");
-            //exit(EXIT_FAILURE); TODO ////////////////////////////////////////////////////////////////////////////////////////////
+            exit(EXIT_FAILURE);
+            //TODO ////////////////////////////////////////////////////////////////////////////////////////////
         }
 
         written += ret;
@@ -208,7 +208,9 @@ void update_client(int notif_pipe_fd, board_t *game_board, int mode) {
     ssize_t bytes = write(notif_pipe_fd, &msg, sizeof(msg_board_update_t));
     if (bytes < 0) {
         fprintf(stderr, "[ERR]: write failed\n");
-        //exit(EXIT_FAILURE); TODO ///////////////////////////////////////////////////////////////////////////////////////////////////
+
+        exit(EXIT_FAILURE);
+        //TODO ///////////////////////////////////////////////////////////////////////////////////////////////////
     }
     send_msg(notif_pipe_fd, board_data, game_board->width * game_board->height);
 }
@@ -259,10 +261,13 @@ void* pacman_thread(void *arg) {
             board->state = QUIT_GAME;
             pthread_exit(NULL);
         }
+        int *retval = malloc(sizeof(int));
         if (ret == -1) {
             // ret == -1 indicates error
             fprintf(stderr, "[ERR]: read failed: %s\n", strerror(errno));
-            //exit(EXIT_FAILURE); TODO /////////////////////////////////////////////////////////////////////////////////////////////////7
+            *retval = -1;
+            return (void*) retval;
+            //TODO /////////////////////////////////////////////////////////////////////////////////////////////////7
         }
 
         c.command = client_play_buffer[1];
@@ -345,6 +350,7 @@ void* session_thread(void *arg) {
     int req_rx = session_arg->req_rx;
     int notif_tx = session_arg->notif_tx;
 
+    free(session_arg);
     // Random seed for any random movements
     srand((unsigned int)time(NULL));
 
@@ -362,6 +368,7 @@ void* session_thread(void *arg) {
     board_t game_board;
     int accumulated_points = 0;
     bool end_game = false;
+    int *retval = malloc(sizeof(int));
 
 
     // pid_t parent_process = getpid(); // Only the parent process can create backups
@@ -403,8 +410,19 @@ void* session_thread(void *arg) {
                 ncurses_arg->board = &game_board;
                 ncurses_arg->notif_tx = notif_tx;
                 pthread_create(&ncurses_tid, NULL, ncurses_thread, (void*) ncurses_arg);
+                int* retval_pac;
+                pthread_join(pacman_tid, (void**)&retval_pac);
+                if (*retval_pac==-1) {
+                    free(retval_pac);
+                    free(ghost_tids);
+                    free(pac_arg);
+                    free(ncurses_arg);
 
-                pthread_join(pacman_tid, NULL);
+                    *retval = -1;
+                    sem_post(&semaforo_clientes);
+                    return (void*) retval;
+                }
+                free(retval_pac);
 
                 pthread_rwlock_wrlock(&game_board.state_lock);
                 thread_shutdown = 1;
@@ -471,16 +489,24 @@ void* session_thread(void *arg) {
     close(notif_tx);
     if (closedir(level_dir) == -1) {
         fprintf(stderr, "Failed to close directory\n");
-        //exit(EXIT_FAILURE); TODO ///////////////////////////////////////////////////////////////////////////////////////////////////////
+        *retval = -1;
+        sem_post(&semaforo_clientes);
+        return (void*) retval;
+        //exit(EXIT_FAILURE);
+        //TODO ///////////////////////////////////////////////////////////////////////////////////////////////////////
     }
     sem_post(&semaforo_clientes);
-    return NULL;
+    *retval = 0;
+    return (void*) retval;
 }
 
 void* host_thread(void *arg) {
     host_thread_arg_t *host_arg = (host_thread_arg_t*) arg;
     int *reg_rx = host_arg->rx;
+    char *directory_name = host_arg->directory_name;
     int result = 0;
+
+    free(host_arg);
 
     while (true) {
         msg_registration_t msg_reg;
@@ -498,28 +524,36 @@ void* host_thread(void *arg) {
         int req_rx = open(msg_reg.req_pipe_path, O_RDONLY);
         if (req_rx == -1) {
             perror("[ERR]: req_pipe open failed");
-            //exit(EXIT_FAILURE); TODO /////////////////////////////////////////////////////////////////////////////////////////////777
+            result = 1;
+            //exit(EXIT_FAILURE);
+            //TODO /////////////////////////////////////////////////////////////////////////////////////////////777
         }
 
         int notif_tx = open(msg_reg.notif_pipe_path, O_WRONLY);
         if (notif_tx == -1) {
             perror("[ERR]: notif_pipe open failed");
-            //exit(EXIT_FAILURE); TODO /////////////////////////////////////////////////////////////////////////////////////////////////
+            continue;
+            //exit(EXIT_FAILURE);
+            //TODO /////////////////////////////////////////////////////////////////////////////////////////////////
         }
 
         pthread_t session_tid;
         session_thread_arg_t *s_arg = malloc(sizeof(session_thread_arg_t));
-        strcpy(s_arg->directory_name, host_arg->directory_name);
+        strcpy(s_arg->directory_name, directory_name);
         s_arg->req_rx = req_rx;
         s_arg->notif_tx = notif_tx;
 
         char response[REQUEST_RESPONSE];
         snprintf(response, sizeof(response), "%d%d", msg_reg.op_code, result);
+        if (result == 1) {
+            continue;
+        }
         send_msg(notif_tx, response, REQUEST_RESPONSE);
         pthread_create(&session_tid, NULL, session_thread, (void*) s_arg);
+        pthread_detach(session_tid);
         // pthread_join(session_tid, NULL);
     }
-    return NULL;
+    pthread_exit(NULL);
 }
 
 
@@ -541,28 +575,30 @@ int main(int argc, char** argv) {
     /* remove pipe if it exists */
     if (unlink(reg_pipe_pathname) != 0 && errno != ENOENT) {
         perror("[ERR]: unlink(%s) failed");
-        return -1;
-        //exit(EXIT_FAILURE); TODO ////////////////////////////////////////////////////////////////////////////////////////////
+        return EXIT_FAILURE;
+        exit(EXIT_FAILURE);
+
     }
 
     /* create pipe */
     if (mkfifo(reg_pipe_pathname, 0640) != 0) {
         perror("[ERR]: mkfifo failed");
-        return -1;
-        //exit(EXIT_FAILURE); TODO ////////////////////////////////////////////////////////////////////////////////////////////
+        return EXIT_FAILURE;
+        //exit(EXIT_FAILURE);
+
     }
 
     int reg_rx = open(reg_pipe_pathname, O_RDONLY);
     if (reg_rx == -1) {
         perror("[ERR]: open failed");
-        return -1;
-        //exit(EXIT_FAILURE); TODO ////////////////////////////////////////////////////////////////////////////////////////////
+        return EXIT_FAILURE;
+        //exit(EXIT_FAILURE);
+
     }
 
     pthread_t host_tid;
     host_thread_arg_t *arg = malloc(sizeof(host_thread_arg_t));
     arg->rx = &reg_rx;
-    arg->max_games = max_games;
     strcpy(arg->directory_name, argv[1]);
     pthread_create(&host_tid, NULL, host_thread, (void*) arg);
     pthread_join(host_tid, NULL);

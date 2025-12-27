@@ -50,6 +50,31 @@ int pacman_connect(char const *req_pipe_path, char const *notif_pipe_path, char 
   int server;
 
   while (1) {
+    /* remove pipe if it exists */
+    if (unlink(req_pipe_path) != 0 && errno != ENOENT) {
+      perror("[ERR]: unlink(%s) failed");
+      return -1;
+      //exit(EXIT_FAILURE);
+    }
+    if (mkfifo(req_pipe_path, 0640) != 0) {
+      perror("[ERR]: mkfifo failed");
+      return -1;
+      //exit(EXIT_FAILURE);
+    }
+
+    /* remove pipe if it exists */
+    if (unlink(notif_pipe_path) != 0 && errno != ENOENT) {
+      perror("[ERR]: unlink(%s) failed");
+      return -1;
+      //exit(EXIT_FAILURE);
+    }
+
+    if (mkfifo(notif_pipe_path, 0640) != 0) {
+      perror("[ERR]: mkfifo failed");
+      return -1;
+      //exit(EXIT_FAILURE);
+    }
+
     server = open(server_pipe_path, O_WRONLY);
     if (server >= 0) break;
 
@@ -64,31 +89,6 @@ int pacman_connect(char const *req_pipe_path, char const *notif_pipe_path, char 
   ssize_t server_write = write(server, &msg_registration, sizeof(msg_registration));
   if (server_write < 0) {
     perror("[ERR]: write failed");
-    return -1;
-    //exit(EXIT_FAILURE);
-  }
-
-  /* remove pipe if it exists */
-  if (unlink(req_pipe_path) != 0 && errno != ENOENT) {
-    perror("[ERR]: unlink(%s) failed");
-    return -1;
-    //exit(EXIT_FAILURE);
-  }
-  if (mkfifo(req_pipe_path, 0640) != 0) {
-    perror("[ERR]: mkfifo failed");
-    return -1;
-    //exit(EXIT_FAILURE);
-  }
-
-  /* remove pipe if it exists */
-  if (unlink(notif_pipe_path) != 0 && errno != ENOENT) {
-    perror("[ERR]: unlink(%s) failed");
-    return -1;
-    //exit(EXIT_FAILURE);
-  }
-
-  if (mkfifo(notif_pipe_path, 0640) != 0) {
-    perror("[ERR]: mkfifo failed");
     return -1;
     //exit(EXIT_FAILURE);
   }

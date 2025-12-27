@@ -160,8 +160,11 @@ int main(int argc, char *argv[]) {
 
     pthread_mutex_destroy(&mutex);
 
-    pacman_disconnect();
+    if (pacman_disconnect() == -1) {
+        perror("[ERR]: client disconnect error");
+        return EXIT_FAILURE;
+    }
     terminal_cleanup();
 
-    return 0;
+    return EXIT_SUCCESS;
 }
