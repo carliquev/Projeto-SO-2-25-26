@@ -53,7 +53,7 @@ int pacman_connect(char const *req_pipe_path, char const *notif_pipe_path, char 
     server = open(server_pipe_path, O_WRONLY);
     if (server >= 0) break;
 
-    if (errno == ENOENT) {  // não existe ainda, ou não há reader
+    if (errno == ENOENT) {  // não existe ainda
       sleep_ms(100);
       continue;
     }
@@ -145,7 +145,7 @@ int pacman_disconnect() {
   return 0;
 }
 
-Board receive_board_update() {
+Board   receive_board_update() {
   ssize_t notif_read = 0;
   msg_board_update_t msg_board;
   msg_board.op_code = 0;
@@ -159,8 +159,12 @@ Board receive_board_update() {
     }
 
     if (msg_board.op_code!=4) continue;
-
-
+    int game_over = msg_board.game_over;
+    if (game_over==2) {
+      memset(&game_board, 0, sizeof(Board));
+      game_board.game_over = 2;
+      return game_board;
+    }
     game_board.width = msg_board.width;
     game_board.height = msg_board.height;
     int board_dim = game_board.width * game_board.height;

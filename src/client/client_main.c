@@ -24,7 +24,7 @@ static void *receiver_thread(void *arg) {
         
         Board board = receive_board_update();
 
-        if (!board.data || board.game_over == 1){
+        if (!board.data || board.game_over > 1){
             pthread_mutex_lock(&mutex);
             stop_execution = true;
             pthread_mutex_unlock(&mutex);
@@ -125,6 +125,11 @@ int main(int argc, char *argv[]) {
             sleep_ms(wait_for);
             
         } else {
+            pthread_mutex_lock(&mutex);
+            if (stop_execution) {
+                break;
+            }
+            pthread_mutex_unlock(&mutex);
             // Interactive input
             command = get_input();
             command = toupper(command);
@@ -133,18 +138,18 @@ int main(int argc, char *argv[]) {
         if (command == '\0')
             continue;
 
-        if (command == 'Q') {
-            debug("Client pressed 'Q', quitting game\n");
-            break;
-        }
 
         debug("Command: %c\n", command);
+
+        pthread_mutex_lock(&mutex);
+        if (stop_execution) {
+            break;
+        }
+        pthread_mutex_unlock(&mutex);
 
         pacman_play(command);
 
     }
-
-
     pthread_join(receiver_thread_id, NULL);
 
     if (cmd_fp)

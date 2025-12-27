@@ -23,7 +23,7 @@
 #define DEFAULT 0
 #define VICTORY 1
 #define GAMEOVER 2
-#define VICTORY_AND_GAMEOVER 3
+#define ENDGAME 3
 
 #define CLIENT_REQUEST_SIZE 82
 #define REQUEST_RESPONSE 3
@@ -41,6 +41,7 @@ typedef struct {
 typedef struct {
     board_t *board;
     int ghost_index;
+    pthread_t pacman_tid;
 } ghost_thread_arg_t;
 
 typedef struct {
@@ -158,9 +159,8 @@ void screen_refresh(board_t * game_board, int mode) {
     refresh_screen();     
 }
 
-void send_msg(int fd, char const *str) {
-    size_t len = strlen(str);
-    size_t written = 0;
+void send_msg(int fd, char const *str, ssize_t len) {
+    ssize_t written = 0;
 
     while (written < len) {
         ssize_t ret = write(fd, str + written, len - written);
@@ -175,33 +175,41 @@ void send_msg(int fd, char const *str) {
 
 void update_client(int notif_pipe_fd, board_t *game_board, int mode) {
     int victory = 0, game_over = 0, op_code = 4;
+    char *board_data;
     if (mode == VICTORY) {
         victory = 1;
     } else if (mode == GAMEOVER) {
         game_over = 1;
-    } else if (mode == VICTORY_AND_GAMEOVER) {
-        victory = 1;
-        game_over = 1;
+    } else if (mode == ENDGAME) {
+        game_over = 2;
     }
-
     msg_board_update_t msg;
     msg.op_code = op_code;
-    msg.width = game_board->width;
-    msg.height = game_board->height;
-    msg.tempo = game_board->tempo;
     msg.victory = victory;
     msg.game_over = game_over;
-    msg.points = game_board->pacmans[0].points;
 
-    char *board_data = malloc((game_board->width * game_board->height) * sizeof(char));
-    board_to_char(game_board, &board_data);
+    if (mode !=ENDGAME){
+        msg.width = game_board->width;
+        msg.height = game_board->height;
+        msg.tempo = game_board->tempo;
+        msg.points = game_board->pacmans[0].points;
+        board_data = malloc((game_board->width * game_board->height) * sizeof(char));
+        board_to_char(game_board, &board_data);
+    } else{
+        msg.width = 0;
+        msg.height = 0;
+        msg.tempo = 0;
+        msg.points = 0;
+        board_data = NULL;
+    }
+    
 
     ssize_t bytes = write(notif_pipe_fd, &msg, sizeof(msg_board_update_t));
     if (bytes < 0) {
         fprintf(stderr, "[ERR]: write failed\n");
         exit(EXIT_FAILURE);
     }
-    send_msg(notif_pipe_fd, board_data);
+    send_msg(notif_pipe_fd, board_data, game_board->width * game_board->height);
 }
 
 void* ncurses_thread(void *arg) {
@@ -211,14 +219,14 @@ void* ncurses_thread(void *arg) {
     sleep_ms(board->tempo / 2);
     while (true) {
         sleep_ms(board->tempo);
-        pthread_rwlock_wrlock(&board->state_lock);
+        // pthread_rwlock_wrlock(&board->state_lock);
         if (thread_shutdown) {
-            pthread_rwlock_unlock(&board->state_lock);
+            // pthread_rwlock_unlock(&board->state_lock);
             pthread_exit(NULL);
         }
         // screen_refresh(board, DRAW_MENU);
         update_client(ncurses_thread_arg->notif_tx, board, DEFAULT);
-        pthread_rwlock_unlock(&board->state_lock);
+        // pthread_rwlock_unlock(&board->state_lock);
     }
 }
 
@@ -229,12 +237,13 @@ void* pacman_thread(void *arg) {
 
     pacman_t* pacman = &board->pacmans[0];
 
-    int *retval = malloc(sizeof(int));
-
     while (true) {
         if(!pacman->alive) {
-            *retval = LOAD_BACKUP;
-            return (void*) retval;
+            board->state = QUIT_GAME;
+            pthread_exit(NULL);
+        }
+        if (board->state != CONTINUE_PLAY) {
+            pthread_exit(NULL);
         }
 
         sleep_ms(board->tempo * (1 + pacman->passo));
@@ -242,20 +251,13 @@ void* pacman_thread(void *arg) {
         command_t* play;
         command_t c;
         char client_play_buffer[CLIENT_PLAY_SIZE];
-        while (true) {
-            ssize_t ret = read(req_rx, client_play_buffer, CLIENT_PLAY_SIZE);
-            if (ret == -1) {
-                // ret == -1 indicates error
-                fprintf(stderr, "[ERR]: read failed: %s\n", strerror(errno));
-                exit(EXIT_FAILURE);
-            }
-            if (ret == 0) {
-                sleep_ms(100);
-                continue;
-            }
-            break;
-        }
 
+        ssize_t ret = read(req_rx, client_play_buffer, CLIENT_PLAY_SIZE);
+        if (ret == -1) {
+            // ret == -1 indicates error
+            fprintf(stderr, "[ERR]: read failed: %s\n", strerror(errno));
+            exit(EXIT_FAILURE);
+        }
 
         c.command = client_play_buffer[1];
 
@@ -271,40 +273,41 @@ void* pacman_thread(void *arg) {
 
         // QUIT
         if (play->command == 'Q') {
-            *retval = QUIT_GAME;
-            return (void*) retval;
+            board->state = QUIT_GAME;
+            pthread_exit(NULL);
         }
-        // FORK
-        if (play->command == 'G') {
-            *retval = CREATE_BACKUP;
-            return (void*) retval;
-        }
+        // // FORK
+        // if (play->command == 'G') {
+        //     *retval = CREATE_BACKUP;
+        //     return (void*) retval;
+        // }
 
         pthread_rwlock_rdlock(&board->state_lock);
 
         int result = move_pacman(board, 0, play);
         if (result == REACHED_PORTAL) {
             // Next level
-            *retval = NEXT_LEVEL;
+            board->state = NEXT_LEVEL;
             break;
         }
 
         if(result == DEAD_PACMAN) {
             // Restart from child, wait for child, then quit
-            *retval = LOAD_BACKUP;
+            board->state = QUIT_GAME;
             break;
         }
 
         pthread_rwlock_unlock(&board->state_lock);
     }
     pthread_rwlock_unlock(&board->state_lock);
-    return (void*) retval;
+    pthread_exit(NULL);
 }
 
 void* ghost_thread(void *arg) {
     ghost_thread_arg_t *ghost_arg = (ghost_thread_arg_t*) arg;
     board_t *board = ghost_arg->board;
     int ghost_ind = ghost_arg->ghost_index;
+    pthread_t pacman_tid = ghost_arg->pacman_tid;
 
     free(ghost_arg);
 
@@ -314,12 +317,17 @@ void* ghost_thread(void *arg) {
         sleep_ms(board->tempo * (1 + ghost->passo));
 
         pthread_rwlock_rdlock(&board->state_lock);
-        if (thread_shutdown) {
+        if (thread_shutdown || board->state != CONTINUE_PLAY) {
             pthread_rwlock_unlock(&board->state_lock);
             pthread_exit(NULL);
         }
         
-        move_ghost(board, ghost_ind, &ghost->moves[ghost->current_move%ghost->n_moves]);
+        if (move_ghost(board, ghost_ind, &ghost->moves[ghost->current_move%ghost->n_moves])==DEAD_PACMAN) {
+            board->state = QUIT_GAME;
+            pthread_cancel(pacman_tid);
+            pthread_rwlock_unlock(&board->state_lock);
+            pthread_exit(NULL);
+        }
         pthread_rwlock_unlock(&board->state_lock);
     }
 }
@@ -361,6 +369,7 @@ void* session_thread(void *arg) {
 
         if (strcmp(dot, ".lvl") == 0) {
             load_level(&game_board, entry->d_name, directory_name, accumulated_points);
+            game_board.state = CONTINUE_PLAY;
             update_client(notif_tx, &game_board, DEFAULT);
             // draw_board(&game_board, DRAW_MENU);
             // refresh_screen();
@@ -381,6 +390,7 @@ void* session_thread(void *arg) {
                     ghost_thread_arg_t *ghost_arg = malloc(sizeof(ghost_thread_arg_t));
                     ghost_arg->board = &game_board;
                     ghost_arg->ghost_index = i;
+                    ghost_arg->pacman_tid = pacman_tid;
                     pthread_create(&ghost_tids[i], NULL, ghost_thread, (void*) ghost_arg);
                 }
                 ncurses_thread_arg_t *ncurses_arg = malloc(sizeof(ncurses_thread_arg_t));
@@ -388,8 +398,7 @@ void* session_thread(void *arg) {
                 ncurses_arg->notif_tx = notif_tx;
                 pthread_create(&ncurses_tid, NULL, ncurses_thread, (void*) ncurses_arg);
 
-                int *retval;
-                pthread_join(pacman_tid, (void**)&retval);
+                pthread_join(pacman_tid, NULL);
 
                 pthread_rwlock_wrlock(&game_board.state_lock);
                 thread_shutdown = 1;
@@ -402,71 +411,13 @@ void* session_thread(void *arg) {
 
                 free(ghost_tids);
 
-                int result = *retval;
-                free(retval);
+                int result = game_board.state;
 
                 if(result == NEXT_LEVEL) {
                     // screen_refresh(&game_board, DRAW_WIN);
                     update_client(notif_tx, &game_board, VICTORY);
                     sleep_ms(game_board.tempo);
                     break;
-                }
-
-                // if(result == CREATE_BACKUP) {
-                //     debug("CREATE_BACKUP\n");
-                //     if (parent_process == getpid()) {
-                //         debug("PARENT\n");
-                //         pid_t child = create_backup();
-                //         if (child == -1) {
-                //             // failed to fork
-                //             debug("[%d] Failed to create backup\n", getpid());
-                //             end_game = true;
-                //             break;
-                //         }
-                //         if (child > 0) {
-                //             debug("Parent process\n");
-                //             int status;
-                //             wait(&status);
-                //
-                //             if (WIFEXITED(status)) {
-                //                 int code = WEXITSTATUS(status);
-                //
-                //                 if (code == 1) {
-                //                     terminal_init();
-                //                     debug("[%d] Save Resuming...\n", getpid());
-                //                 }
-                //                 else { // End game or error
-                //                     end_game = true;
-                //                     break;
-                //                 }
-                //             }
-                //         } else {
-                //             terminal_init();
-                //             debug("Child process\n");
-                //         }
-                //
-                //     } else {
-                //         debug("[%d] Only parent process can have a save\n", getpid());
-                //     }
-                // }
-
-                if(result == LOAD_BACKUP) {
-                    // if(getpid() != parent_process) {
-                    //     terminal_cleanup();
-                    //     unload_level(&game_board);
-                    //
-                    //     close_debug_file();
-                    //
-                    //     if (closedir(level_dir) == -1) {
-                    //         fprintf(stderr, "Failed to close directory\n");
-                    //         exit(EXIT_FAILURE);
-                    //     }
-                    //
-                    //     return NULL;
-                    // } else {
-                        // No backup process, game over
-                        result = QUIT_GAME;
-                    // }
                 }
 
                 if(result == QUIT_GAME) {
@@ -479,29 +430,36 @@ void* session_thread(void *arg) {
 
                 // screen_refresh(&game_board, DRAW_MENU);
                 update_client(notif_tx, &game_board, DEFAULT);
-
                 accumulated_points = game_board.pacmans[0].points;
             }
             // print_board(&game_board);
             if (game_board.pacmans[0].alive) {
-                update_client(notif_tx, &game_board, VICTORY_AND_GAMEOVER);
+                update_client(notif_tx, &game_board, VICTORY);
             }
 
             unload_level(&game_board);
+
+
         }
     }
-
-    // terminal_cleanup();
-
     close_debug_file();
+    // Se já não há mais níveis
+    board_t end_board;
+    update_client(notif_tx, &end_board, ENDGAME);
+    char disconnect_message;
+
+    ssize_t ret = read(req_rx, &disconnect_message, 1);
+    if (ret != 1 && disconnect_message != '2') {
+        fprintf(stderr, "[ERR]: client not disconnecting correctly\n");
+        exit(EXIT_FAILURE);
+    }
+    close(req_rx);
+    close(notif_tx);
 
     if (closedir(level_dir) == -1) {
         fprintf(stderr, "Failed to close directory\n");
         exit(EXIT_FAILURE);
     }
-
-    close(req_rx);
-    close(notif_tx);
 
     return NULL;
 }
@@ -545,7 +503,7 @@ void* host_thread(void *arg) {
 
         char response[REQUEST_RESPONSE];
         snprintf(response, sizeof(response), "%d%d", msg_reg.op_code, result);
-        send_msg(notif_tx, response);
+        send_msg(notif_tx, response, REQUEST_RESPONSE);
         pthread_create(&session_tid, NULL, session_thread, (void*) s_arg);
         pthread_join(session_tid, NULL);
     }
