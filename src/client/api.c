@@ -64,40 +64,47 @@ int pacman_connect(char const *req_pipe_path, char const *notif_pipe_path, char 
   ssize_t server_write = write(server, &msg_registration, sizeof(msg_registration));
   if (server_write < 0) {
     perror("[ERR]: write failed");
-    exit(EXIT_FAILURE);
+    return -1;
+    //exit(EXIT_FAILURE);
   }
 
   /* remove pipe if it exists */
   if (unlink(req_pipe_path) != 0 && errno != ENOENT) {
     perror("[ERR]: unlink(%s) failed");
-    exit(EXIT_FAILURE);
+    return -1;
+    //exit(EXIT_FAILURE);
   }
   if (mkfifo(req_pipe_path, 0640) != 0) {
     perror("[ERR]: mkfifo failed");
-    exit(EXIT_FAILURE);
+    return -1;
+    //exit(EXIT_FAILURE);
   }
 
   /* remove pipe if it exists */
   if (unlink(notif_pipe_path) != 0 && errno != ENOENT) {
     perror("[ERR]: unlink(%s) failed");
-    exit(EXIT_FAILURE);
+    return -1;
+    //exit(EXIT_FAILURE);
   }
 
   if (mkfifo(notif_pipe_path, 0640) != 0) {
     perror("[ERR]: mkfifo failed");
-    exit(EXIT_FAILURE);
+    return -1;
+    //exit(EXIT_FAILURE);
   }
 
   session.req_pipe = open(req_pipe_path, O_WRONLY);
   if (session.req_pipe == -1) {
     perror("[ERR]: open failed");
-    exit(EXIT_FAILURE);
+    return -1;
+    //exit(EXIT_FAILURE);
   }
 
   session.notif_pipe = open(notif_pipe_path, O_RDONLY);
   if (session.notif_pipe == -1) {
     perror("[ERR]: open failed");
-    exit(EXIT_FAILURE);
+    return -1;
+    //exit(EXIT_FAILURE);
   }
 
   strcpy(session.notif_pipe_path, notif_pipe_path);
@@ -108,11 +115,13 @@ int pacman_connect(char const *req_pipe_path, char const *notif_pipe_path, char 
   if (notif_read == -1) {
     //fprintf(stderr, "[ERR]: read failed: %s\n", strerror(errno));
     perror("[ERR]: read failed");
-    exit(EXIT_FAILURE);
+    return -1;
+    //exit(EXIT_FAILURE);
   }
   if (notif_reader[0]=='1') {
     if (notif_reader[1]=='1') {
-      exit(EXIT_FAILURE);
+      return -1;
+      //exit(EXIT_FAILURE);
     }
 
     strcpy(session.req_pipe_path, req_pipe_path);
@@ -129,7 +138,7 @@ void pacman_play(char command) {
   notif_write = write(session.req_pipe, buffer, sizeof(buffer));
   if (notif_write < 0) {
     perror("[ERR]: write failed");
-    exit(EXIT_FAILURE);
+    //exit(EXIT_FAILURE); TODO THIS PROBABLY WONT GO WELL ////////////////////////////////////////////////////////////////////////////////////
   }
 }
 
@@ -155,7 +164,8 @@ Board   receive_board_update() {
     notif_read = read(session.notif_pipe, &msg_board, sizeof(msg_board_update_t));
     if (notif_read == -1) {
       perror("[ERR]: read failed");
-      exit(EXIT_FAILURE);
+      return game_board; //TODO I DONT THINK THIS WORKS /////////////////////////////////////////////////////////////////////////////////////
+      //exit(EXIT_FAILURE);
     }
 
     if (msg_board.op_code!=4) continue;

@@ -167,7 +167,7 @@ void send_msg(int fd, char const *str, ssize_t len) {
         ssize_t ret = write(fd, str + written, len - written);
         if (ret < 0) {
             perror("[ERR]: write failed");
-            exit(EXIT_FAILURE);
+            //exit(EXIT_FAILURE); TODO ////////////////////////////////////////////////////////////////////////////////////////////
         }
 
         written += ret;
@@ -208,7 +208,7 @@ void update_client(int notif_pipe_fd, board_t *game_board, int mode) {
     ssize_t bytes = write(notif_pipe_fd, &msg, sizeof(msg_board_update_t));
     if (bytes < 0) {
         fprintf(stderr, "[ERR]: write failed\n");
-        exit(EXIT_FAILURE);
+        //exit(EXIT_FAILURE); TODO ///////////////////////////////////////////////////////////////////////////////////////////////////
     }
     send_msg(notif_pipe_fd, board_data, game_board->width * game_board->height);
 }
@@ -262,7 +262,7 @@ void* pacman_thread(void *arg) {
         if (ret == -1) {
             // ret == -1 indicates error
             fprintf(stderr, "[ERR]: read failed: %s\n", strerror(errno));
-            exit(EXIT_FAILURE);
+            //exit(EXIT_FAILURE); TODO /////////////////////////////////////////////////////////////////////////////////////////////////7
         }
 
         c.command = client_play_buffer[1];
@@ -471,7 +471,7 @@ void* session_thread(void *arg) {
     close(notif_tx);
     if (closedir(level_dir) == -1) {
         fprintf(stderr, "Failed to close directory\n");
-        exit(EXIT_FAILURE);
+        //exit(EXIT_FAILURE); TODO ///////////////////////////////////////////////////////////////////////////////////////////////////////
     }
     sem_post(&semaforo_clientes);
     return NULL;
@@ -498,13 +498,13 @@ void* host_thread(void *arg) {
         int req_rx = open(msg_reg.req_pipe_path, O_RDONLY);
         if (req_rx == -1) {
             perror("[ERR]: req_pipe open failed");
-            exit(EXIT_FAILURE);
+            //exit(EXIT_FAILURE); TODO /////////////////////////////////////////////////////////////////////////////////////////////777
         }
 
         int notif_tx = open(msg_reg.notif_pipe_path, O_WRONLY);
         if (notif_tx == -1) {
             perror("[ERR]: notif_pipe open failed");
-            exit(EXIT_FAILURE);
+            //exit(EXIT_FAILURE); TODO /////////////////////////////////////////////////////////////////////////////////////////////////
         }
 
         pthread_t session_tid;
@@ -541,19 +541,22 @@ int main(int argc, char** argv) {
     /* remove pipe if it exists */
     if (unlink(reg_pipe_pathname) != 0 && errno != ENOENT) {
         perror("[ERR]: unlink(%s) failed");
-        exit(EXIT_FAILURE);
+        return -1;
+        //exit(EXIT_FAILURE); TODO ////////////////////////////////////////////////////////////////////////////////////////////
     }
 
     /* create pipe */
     if (mkfifo(reg_pipe_pathname, 0640) != 0) {
         perror("[ERR]: mkfifo failed");
-        exit(EXIT_FAILURE);
+        return -1;
+        //exit(EXIT_FAILURE); TODO ////////////////////////////////////////////////////////////////////////////////////////////
     }
 
     int reg_rx = open(reg_pipe_pathname, O_RDONLY);
     if (reg_rx == -1) {
         perror("[ERR]: open failed");
-        exit(EXIT_FAILURE);
+        return -1;
+        //exit(EXIT_FAILURE); TODO ////////////////////////////////////////////////////////////////////////////////////////////
     }
 
     pthread_t host_tid;
