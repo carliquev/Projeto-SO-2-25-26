@@ -197,6 +197,7 @@ Board   receive_board_update() {
       notif_read = read_msg(session.notif_pipe, game_board.data, (board_dim)*sizeof(char));
       if (notif_read == -1) {
         //fprintf(stderr, "[ERR]: read failed: %s\n", strerror(errno));
+        free(game_board.data);
         perror("[ERR]: read failed");
         exit(EXIT_FAILURE);
       }
@@ -205,5 +206,6 @@ Board   receive_board_update() {
     }
     return game_board;
   }
+  free(game_board.data);
   exit(EXIT_FAILURE);
 }

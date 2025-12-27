@@ -39,6 +39,7 @@ static void *receiver_thread(void *arg) {
         free(board.data);
     }
 
+    free(board.data);
     debug("Returning receiver thread...\n");
     return NULL;
 }

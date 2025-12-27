@@ -565,6 +565,8 @@ void* host_thread(void *arg) {
 
         int response_write = write_msg(notif_tx, &response, sizeof(msg_reg_response_t));
         if (response_write < 0) {
+            free(s_arg);
+            free(session);
             perror("[ERR]: write failed");
             exit(EXIT_FAILURE);
         }
@@ -626,5 +628,6 @@ int main(int argc, char** argv) {
     pthread_create(&host_tid, NULL, host_thread, (void*) arg);
     pthread_join(host_tid, NULL);
     close_debug_file();
+    free(arg);
     return 0;
 }
