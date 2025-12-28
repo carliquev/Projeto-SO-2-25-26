@@ -2,7 +2,6 @@
 #include "protocol.h"
 #include "display.h"
 #include "debug.h"
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -24,7 +23,7 @@ static void *receiver_thread(void *arg) {
         
         Board board = receive_board_update();
 
-        if (!board.data || board.game_over > 1){
+        if (board.game_over > 1 || !board.data){
             pthread_mutex_lock(&mutex);
             stop_execution = true;
             pthread_mutex_unlock(&mutex);
@@ -37,6 +36,7 @@ static void *receiver_thread(void *arg) {
 
         draw_board_client(board);
         refresh_screen();
+        free(board.data);
     }
 
     debug("Returning receiver thread...\n");

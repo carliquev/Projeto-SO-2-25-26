@@ -21,25 +21,36 @@ struct Session {
   char notif_pipe_path[MAX_PIPE_PATH_LENGTH + 1];
 } ;
 
-typedef struct {
-  int op_code;
-  char req_pipe_path[MAX_PIPE_PATH_LENGTH + 1];
-  char notif_pipe_path[MAX_PIPE_PATH_LENGTH + 1];
-} msg_registration_t;
-
-typedef struct {
-  int op_code;
-  int width;
-  int height;
-  int tempo;
-  int victory;
-  int game_over;
-  int points;
-} msg_board_update_t;
-
-
-
 static struct Session session = {.id = -1};
+
+static int read_msg(int fd, void *buf, size_t n) {
+  size_t off = 0;
+  while (off < n) {
+    ssize_t r = read(fd, (char*)buf + off, n - off);
+    if (r < 0) {
+      if (errno == EINTR) continue;
+      return -1;
+    }
+    if (r == 0) return -1; // EOF
+    off += (size_t)r;
+  }
+  return 0;
+}
+
+
+static int write_msg(int fd, const void *buf, size_t n) {
+  size_t off = 0;
+  while (off < n) {
+    ssize_t w = write(fd, (const char*)buf + off, n - off);
+    if (w < 0) {
+      if (errno == EINTR) continue;
+      return -1;
+    }
+    if (w == 0) return -1;
+    off += (size_t)w;
+  }
+  return 0;
+}
 
 int pacman_connect(char const *req_pipe_path, char const *notif_pipe_path, char const *server_pipe_path) {
 
@@ -86,7 +97,7 @@ int pacman_connect(char const *req_pipe_path, char const *notif_pipe_path, char 
     return -1;
   }
 
-  ssize_t server_write = write(server, &msg_registration, sizeof(msg_registration));
+  int server_write = write_msg(server, &msg_registration, sizeof(msg_registration));
   if (server_write < 0) {
     perror("[ERR]: write failed");
     return -1;
@@ -108,9 +119,8 @@ int pacman_connect(char const *req_pipe_path, char const *notif_pipe_path, char 
   }
 
   strcpy(session.notif_pipe_path, notif_pipe_path);
-  char notif_reader[2];
-  ssize_t notif_read = 0;
-  notif_read = read(session.notif_pipe, notif_reader, 2);
+  msg_reg_response_t response;
+  int notif_read = read_msg(session.notif_pipe, &response, sizeof(msg_reg_response_t));
 
   if (notif_read == -1) {
     //fprintf(stderr, "[ERR]: read failed: %s\n", strerror(errno));
@@ -118,8 +128,8 @@ int pacman_connect(char const *req_pipe_path, char const *notif_pipe_path, char 
     return -1;
     //exit(EXIT_FAILURE);
   }
-  if (notif_reader[0]=='1') {
-    if (notif_reader[1]=='1') {
+  if (response.op_code==OP_CODE_CONNECT) {
+    if (response.result==1) {
       return -1;
       //exit(EXIT_FAILURE);
     }
@@ -131,11 +141,11 @@ int pacman_connect(char const *req_pipe_path, char const *notif_pipe_path, char 
 }
 
 void pacman_play(char command) {
-  ssize_t notif_write;
-  char buffer[2];
-  buffer[0] = '3'; //op_code
-  buffer[1] = command;
-  notif_write = write(session.req_pipe, buffer, sizeof(buffer));
+  msg_play_t msg_play;
+  msg_play.op_code = OP_CODE_PLAY;
+  msg_play.command = command;
+
+  int notif_write = write_msg(session.req_pipe, &msg_play, sizeof(msg_play_t));
   if (notif_write < 0) {
     perror("[ERR]: write failed");
     //exit(EXIT_FAILURE); TODO THIS PROBABLY WONT GO WELL ////////////////////////////////////////////////////////////////////////////////////
@@ -143,8 +153,7 @@ void pacman_play(char command) {
 }
 
 int pacman_disconnect() {
-  ssize_t req_write;
-  req_write = write(session.req_pipe, "2", 1);
+  int req_write = write_msg(session.req_pipe, "2", 1);
   if (req_write < 0) {
     perror("[ERR]: write failed");
     return -1;
@@ -155,13 +164,13 @@ int pacman_disconnect() {
 }
 
 Board   receive_board_update() {
-  ssize_t notif_read = 0;
   msg_board_update_t msg_board;
   msg_board.op_code = 0;
   Board game_board;
+  game_board.data = NULL;
 
   while (msg_board.op_code !=4) {
-    notif_read = read(session.notif_pipe, &msg_board, sizeof(msg_board_update_t));
+    int notif_read = read_msg(session.notif_pipe, &msg_board, sizeof(msg_board_update_t));
     if (notif_read == -1) {
       perror("[ERR]: read failed");
       return game_board; //TODO I DONT THINK THIS WORKS /////////////////////////////////////////////////////////////////////////////////////
@@ -184,11 +193,15 @@ Board   receive_board_update() {
     game_board.accumulated_points = msg_board.points;
     game_board.data = malloc((board_dim)*sizeof(char));
 
-    notif_read = read(session.notif_pipe, game_board.data, board_dim);
-    if (notif_read == -1) {
-      //fprintf(stderr, "[ERR]: read failed: %s\n", strerror(errno));
-      perror("[ERR]: read failed");
-      exit(EXIT_FAILURE);
+    if (game_board.game_over!=2) {
+      notif_read = read_msg(session.notif_pipe, game_board.data, (board_dim)*sizeof(char));
+      if (notif_read == -1) {
+        //fprintf(stderr, "[ERR]: read failed: %s\n", strerror(errno));
+        perror("[ERR]: read failed");
+        exit(EXIT_FAILURE);
+      }
+    } else {
+      game_board.data = NULL;
     }
     return game_board;
   }
