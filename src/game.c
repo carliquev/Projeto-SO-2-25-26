@@ -660,11 +660,26 @@ void* host_thread(void *arg) {
         int flags = fcntl(req_rx, F_GETFL, 0);
         fcntl(req_rx, F_SETFL, flags & ~O_NONBLOCK);
 
-        int notif_tx = open(msg_reg.notif_pipe_path, O_WRONLY);
-        if (notif_tx == -1) {
-            perror("[ERR]: notif_pipe open failed");
-            result=1;
+        valid = true;
+        int notif_tx = 0;
+        while (true) {
+            notif_tx = open(msg_reg.notif_pipe_path, O_WRONLY | O_NONBLOCK);
+            if (notif_tx == -1 && errno == ENXIO) {
+                sleep_ms(100);
+            }
+            else if (notif_tx == -1) {
+                perror("[ERR]: req_pipe open failed");
+                valid = false;
+                break;
+            } else {
+                break;
+            }
+
         }
+        if (valid == false) result = 1;
+        // Remove O_NONBLOCK depois de abrir para I/O ser bloqueante normal
+        flags = fcntl(notif_tx, F_GETFL, 0);
+        fcntl(notif_tx, F_SETFL, flags & ~O_NONBLOCK);
 
         char client_id_char[MAX_PIPE_PATH_LENGTH];
         int parsed = sscanf(msg_reg.req_pipe_path, "/tmp/%s_request", client_id_char);
@@ -756,7 +771,7 @@ int main(int argc, char** argv) {
     if (unlink(reg_pipe_pathname) != 0 && errno != ENOENT) {
         perror("[ERR]: unlink(%s) failed");
         return EXIT_FAILURE;
-        exit(EXIT_FAILURE);
+        //exit(EXIT_FAILURE);
 
     }
 
