@@ -14,7 +14,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <semaphore.h>
-#include <signal.h>
+
 
 #define CONTINUE_PLAY 0
 #define NEXT_LEVEL 1
@@ -27,6 +27,9 @@
 #define GAMEOVER 2
 #define ENDGAME 3
 
+#define MAX_SESSIONS 100
+#define TOP_SESSIONS 5
+
 
 //int array?
 #define NOTIF_SIZE 8
@@ -38,6 +41,13 @@ typedef struct {
     int error;
     pthread_mutex_t lock;
 } session_t;
+
+typedef struct {
+    session_t *session;
+    int id;
+    int *points;
+    bool active;
+} session_state_t;
 
 typedef struct {
     board_t *board;
@@ -63,8 +73,14 @@ typedef struct {
 
 typedef struct {
     char directory_name[MAX_FILENAME];
-    session_t *session;
+    session_state_t *session_state;
 } session_thread_arg_t;
+
+session_state_t* sessions[MAX_SESSIONS];
+int connected = 0;
+int active = 0;
+static volatile sig_atomic_t sigusr1_received = 0;
+pthread_mutex_t sessions_lock = PTHREAD_MUTEX_INITIALIZER;
 
 
 sem_t semaforo_clientes;
@@ -349,10 +365,18 @@ void* ghost_thread(void *arg) {
 }
 
 void* session_thread(void *arg) {
+
+    //inibição de SIGUSR1 nas sessions
+    sigset_t mask;
+    sigemptyset(&mask);
+    sigaddset(&mask, SIGUSR1);
+    pthread_sigmask(SIG_BLOCK, &mask, NULL);
+
     session_thread_arg_t *session_arg = (session_thread_arg_t*) arg;
     char directory_name[MAX_FILENAME];
     strcpy(directory_name, session_arg->directory_name);
-    session_t *session = session_arg->session;
+    session_state_t *session_state = session_arg->session_state;
+    session_t *session = session_state->session;
     int req_rx = session->req_rx;
     int notif_tx = session->notif_tx;
     session->error = 0;
@@ -371,6 +395,10 @@ void* session_thread(void *arg) {
         pthread_mutex_unlock(&session->lock);
         pthread_mutex_destroy(&session->lock);
         // free(session);
+        pthread_mutex_lock(&sessions_lock);
+        --active;
+        session_state->active = false;
+        pthread_mutex_unlock(&sessions_lock);
         sem_post(&semaforo_clientes);
         pthread_exit(NULL);
     }
@@ -380,8 +408,6 @@ void* session_thread(void *arg) {
     board_t game_board;
     int accumulated_points = 0;
     bool end_game = false;
-
-
 
     // pid_t parent_process = getpid(); // Only the parent process can create backups
 
@@ -394,6 +420,8 @@ void* session_thread(void *arg) {
 
         if (strcmp(dot, ".lvl") == 0) {
             load_level(&game_board, entry->d_name, directory_name, accumulated_points);
+            session_state->points = &(game_board.pacmans[0].points);
+
             game_board.state = CONTINUE_PLAY;
             update_client(session, &game_board, DEFAULT);
             // draw_board(&game_board, DRAW_MENU);
@@ -426,11 +454,16 @@ void* session_thread(void *arg) {
                 pthread_create(&ncurses_tid, NULL, ncurses_thread, (void*) ncurses_arg);
 
                 pthread_join(pacman_tid, NULL);
+
                 int err;
                 pthread_mutex_lock(&session->lock);
                 err = session->error;
                 pthread_mutex_unlock(&session->lock);
                 if (err==1) {
+                    pthread_mutex_lock(&sessions_lock);
+                    --active;
+                    session_state->active = false;
+                    pthread_mutex_unlock(&sessions_lock);
                     sem_post(&semaforo_clientes);
                     pthread_exit(NULL);
                 }
@@ -451,6 +484,7 @@ void* session_thread(void *arg) {
 
                 if(result == NEXT_LEVEL) {
                     // screen_refresh(&game_board, DRAW_WIN);
+                    accumulated_points = game_board.pacmans[0].points;
                     update_client(session, &game_board, VICTORY);
                     sleep_ms(game_board.tempo);
                     break;
@@ -466,12 +500,12 @@ void* session_thread(void *arg) {
 
                 // screen_refresh(&game_board, DRAW_MENU);
                 update_client(session, &game_board, DEFAULT);
-                accumulated_points = game_board.pacmans[0].points;
+
             }
             // print_board(&game_board);
-            // if (game_board.pacmans[0].alive) {
-            //     update_client(session, &game_board, VICTORY);
-            // }
+            if (game_board.pacmans[0].alive) {
+                update_client(session, &game_board, VICTORY);
+            }
 
             unload_level(&game_board);
 
@@ -506,34 +540,103 @@ void* session_thread(void *arg) {
         session->error = 1;
         pthread_mutex_destroy(&session->lock);
         // free(session);
+        pthread_mutex_lock(&sessions_lock);
+        --active;
+        session_state->active = false;
+        pthread_mutex_unlock(&sessions_lock);
         sem_post(&semaforo_clientes);
         pthread_exit(NULL);
     }
     pthread_mutex_destroy(&session->lock);
     // free(session);
+    pthread_mutex_lock(&sessions_lock);
+    --active;
+    session_state->active = false;
+    pthread_mutex_unlock(&sessions_lock);
     sem_post(&semaforo_clientes);
     pthread_exit(NULL);
+}
+
+int compare_sessions(const void *a, const void *b) {
+    session_state_t *session_a = *(session_state_t**)a;
+    session_state_t *session_b = *(session_state_t**)b;
+
+    if (session_b->active && (!session_a->active)) return 1;
+    if (session_a->active && (!session_b->active)) return -1;
+
+    int* b_points_ptr = session_b->points;
+    int* a_points_ptr = session_a->points;
+
+    if (*b_points_ptr > *a_points_ptr) return 1;
+    if (*a_points_ptr > *b_points_ptr) return -1;
+
+    //se pontos iguais, ordenar por id
+    return session_a->id - session_b->id;
+}
+
+void top5_generator() {
+    // fprintf(stderr, "Caught SIGSUR1\n");
+    pthread_mutex_lock(&sessions_lock);
+    session_state_t* sessions_copy[MAX_SESSIONS];
+    memcpy(sessions_copy, sessions, connected * sizeof(session_state_t*));
+    int active_sessions = active;
+    pthread_mutex_unlock(&sessions_lock);
+
+    qsort(sessions_copy, connected, sizeof(session_state_t*), compare_sessions);
+
+    int top_n;
+    if (active_sessions < TOP_SESSIONS) {
+        top_n = active_sessions;
+    } else top_n = TOP_SESSIONS;
+
+    for (int i = 0; i < top_n; i++) {
+        session_state_t* session_state = sessions_copy[i];
+        int * points_ptr = session_state->points;
+        printf("ID: %d, Pontos: %d\n",
+                session_state->id, *points_ptr);
+    }
+    printf("\n");
+}
+
+void sig_handler(int sig) {
+    if (sig == SIGUSR1) {
+        sigusr1_received = 1;
+    }
 }
 
 void* host_thread(void *arg) {
     host_thread_arg_t *host_arg = (host_thread_arg_t*) arg;
     int *reg_rx = host_arg->rx;
     char directory_name[MAX_FILENAME];
+
     strcpy(directory_name, host_arg->directory_name);
     int result = 0;
     // free(host_arg);
 
     while (true) {
+        if (sigusr1_received) {
+            sigusr1_received = 0;
+            top5_generator();
+        }
         msg_registration_t msg_reg;
         ssize_t ret = read(*reg_rx, &msg_reg, sizeof(msg_registration_t));
         if (ret == -1) {
+            if (errno == EINTR) {
+                continue;
+            }
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                // Sem dados disponíveis, espera um pouco
+                sleep_ms(100);
+                continue;
+            }
             // ret == -1 indicates error
             fprintf(stderr, "[ERR]: read failed: %s\n", strerror(errno));
             result = 1;
-        } else if (ret==0) {
-            sleep_ms(100);
-            continue;
         }
+        // else if (ret==0) {
+        //     sleep_ms(100);
+        //     continue;
+        // }
 
         sem_wait(&semaforo_clientes);
         int req_rx = open(msg_reg.req_pipe_path, O_RDONLY);
@@ -548,6 +651,22 @@ void* host_thread(void *arg) {
             continue;
         }
 
+        char client_id_char[MAX_PIPE_PATH_LENGTH];
+        int parsed = sscanf(msg_reg.req_pipe_path, "/tmp/%s_request", client_id_char);
+        if (parsed != 1) {
+            perror("[ERR]: req_pipe parse failed");
+            pthread_exit(NULL);
+        }
+
+        int client_id = atoi(client_id_char);
+        // // se já existir client com o mesmo id
+        // if (sessions[client_id]) {
+        //     if (sessions[client_id]->active){
+        //         result = 1;
+        //         perror("[ERR]: duplicate client id");
+        //     }
+        // }
+
         pthread_t session_tid;
         session_t *session = malloc(sizeof(session_t));
         pthread_mutex_init(&session->lock, NULL);
@@ -557,7 +676,6 @@ void* host_thread(void *arg) {
         session->notif_tx = notif_tx;
         session->thread_shutdown = 0;
         session->error = 0;
-        s_arg->session = session;
 
         msg_reg_response_t response;
         response.op_code = msg_reg.op_code;
@@ -565,14 +683,27 @@ void* host_thread(void *arg) {
 
         int response_write = write_msg(notif_tx, &response, sizeof(msg_reg_response_t));
         if (response_write < 0) {
-            free(s_arg);
-            free(session);
             perror("[ERR]: write failed");
             exit(EXIT_FAILURE);
         }
         if (result == 1) {
             continue;
         }
+
+        session_state_t *session_state = malloc(sizeof(session_state_t));
+        session_state->id = client_id;
+        session_state->points = malloc(sizeof(int));
+        *session_state->points = 0;
+        session_state->active = true;
+        session_state->session = session;
+
+
+        sessions[connected] = session_state;
+        ++connected;
+        ++active;
+
+        s_arg->session_state = session_state;
+
         pthread_create(&session_tid, NULL, session_thread, (void*) s_arg);
         pthread_detach(session_tid);
         // pthread_join(session_tid, NULL);
@@ -589,6 +720,14 @@ int main(int argc, char** argv) {
     }
     //SIGPIPE não fecha o programa
     // signal(SIGPIPE, SIG_IGN);
+    struct sigaction sa;
+    sa.sa_handler = sig_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_RESTART;
+    if (sigaction(SIGUSR1, &sa, NULL) == -1) {
+        perror("sigaction failed");
+        return EXIT_FAILURE;
+    }
 
     int max_games = atoi(argv[2]);
     // Inicializa semaforo
@@ -618,8 +757,10 @@ int main(int argc, char** argv) {
         perror("[ERR]: open failed");
         return EXIT_FAILURE;
         //exit(EXIT_FAILURE);
-
     }
+    //torna read non-blocking
+    int flags = fcntl(reg_rx, F_GETFL, 0);
+    fcntl(reg_rx, F_SETFL, flags | O_NONBLOCK);
 
     pthread_t host_tid;
     host_thread_arg_t *arg = malloc(sizeof(host_thread_arg_t));
@@ -628,6 +769,5 @@ int main(int argc, char** argv) {
     pthread_create(&host_tid, NULL, host_thread, (void*) arg);
     pthread_join(host_tid, NULL);
     close_debug_file();
-    free(arg);
     return 0;
 }
