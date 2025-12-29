@@ -170,7 +170,7 @@ void board_to_char(board_t *board, char* char_board) {
 void screen_refresh(board_t * game_board, int mode) {
     debug("REFRESH\n");
     draw_board(game_board, mode);
-    refresh_screen();     
+    refresh_screen();
 }
 
 void send_msg(int fd, char const *str, ssize_t len) {
@@ -353,7 +353,7 @@ void* ghost_thread(void *arg) {
             pthread_rwlock_unlock(&board->state_lock);
             pthread_exit(NULL);
         }
-        
+
         if (move_ghost(board, ghost_ind, &ghost->moves[ghost->current_move%ghost->n_moves])==DEAD_PACMAN) {
             board->state = QUIT_GAME;
             pthread_cancel(pacman_tid);
@@ -503,9 +503,9 @@ void* session_thread(void *arg) {
 
             }
             // print_board(&game_board);
-            if (game_board.pacmans[0].alive) {
-                update_client(session, &game_board, VICTORY);
-            }
+            // if (game_board.pacmans[0].alive) {
+            //     update_client(session, &game_board, VICTORY);
+            // }
 
             unload_level(&game_board);
 
@@ -639,16 +639,31 @@ void* host_thread(void *arg) {
         // }
 
         sem_wait(&semaforo_clientes);
-        int req_rx = open(msg_reg.req_pipe_path, O_RDONLY);
-        if (req_rx == -1) {
-            perror("[ERR]: req_pipe open failed");
-            result = 1;
+        bool valid = true;
+        int req_rx = 0;
+        while (true) {
+            req_rx = open(msg_reg.req_pipe_path, O_RDONLY | O_NONBLOCK);
+            if (req_rx == -1 && errno == ENXIO) {
+                sleep_ms(100);
+            }
+            else if (req_rx == -1) {
+                perror("[ERR]: req_pipe open failed");
+                valid = false;
+                break;
+            } else {
+                break;
+            }
+
         }
+        if (valid == false) result = 1;
+        // Remove O_NONBLOCK depois de abrir para I/O ser bloqueante normal
+        int flags = fcntl(req_rx, F_GETFL, 0);
+        fcntl(req_rx, F_SETFL, flags & ~O_NONBLOCK);
 
         int notif_tx = open(msg_reg.notif_pipe_path, O_WRONLY);
         if (notif_tx == -1) {
             perror("[ERR]: notif_pipe open failed");
-            continue;
+            result=1;
         }
 
         char client_id_char[MAX_PIPE_PATH_LENGTH];
@@ -687,6 +702,7 @@ void* host_thread(void *arg) {
             exit(EXIT_FAILURE);
         }
         if (result == 1) {
+            sem_post(&semaforo_clientes);
             continue;
         }
 
