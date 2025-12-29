@@ -469,9 +469,9 @@ void* session_thread(void *arg) {
                 accumulated_points = game_board.pacmans[0].points;
             }
             // print_board(&game_board);
-            if (game_board.pacmans[0].alive) {
-                update_client(session, &game_board, VICTORY);
-            }
+            // if (game_board.pacmans[0].alive) {
+            //     update_client(session, &game_board, VICTORY);
+            // }
 
             unload_level(&game_board);
 
