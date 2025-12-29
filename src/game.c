@@ -69,7 +69,9 @@ typedef struct {
 typedef struct {
     int *rx;
     char directory_name[MAX_FILENAME];
+    char reg_pipe_path[MAX_PIPE_PATH_LENGTH];
 } host_thread_arg_t;
+
 
 typedef struct {
     char directory_name[MAX_FILENAME];
@@ -607,6 +609,7 @@ void sig_handler(int sig) {
 void* host_thread(void *arg) {
     host_thread_arg_t *host_arg = (host_thread_arg_t*) arg;
     int *reg_rx = host_arg->rx;
+    char *reg_pipe_pathname = host_arg->reg_pipe_path;
     char directory_name[MAX_FILENAME];
 
     strcpy(directory_name, host_arg->directory_name);
@@ -620,6 +623,32 @@ void* host_thread(void *arg) {
         }
         msg_registration_t msg_reg;
         ssize_t ret = read(*reg_rx, &msg_reg, sizeof(msg_registration_t));
+
+        if (ret == 0) {
+            // All writers disconnected → FIFO reached EOF
+            close(*reg_rx);
+
+            // Reopen FIFO (still read-only)
+            do {
+                *reg_rx = open(reg_pipe_pathname, O_RDONLY | O_NONBLOCK);
+            } while (*reg_rx == -1 && errno == EINTR);
+
+            continue;
+        }
+
+        if (ret == -1) {
+            if (errno == EINTR)
+                continue;
+
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                sleep_ms(100);
+                continue;
+            }
+
+            perror("[ERR]: read failed");
+            continue;
+        }
+
         if (ret == -1) {
             if (errno == EINTR) {
                 continue;
@@ -797,6 +826,7 @@ int main(int argc, char** argv) {
     host_thread_arg_t *arg = malloc(sizeof(host_thread_arg_t));
     arg->rx = &reg_rx;
     strcpy(arg->directory_name, argv[1]);
+    strcpy(arg->reg_pipe_path, argv[3]);
     pthread_create(&host_tid, NULL, host_thread, (void*) arg);
     pthread_join(host_tid, NULL);
     close_debug_file();
