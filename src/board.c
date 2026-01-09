@@ -180,7 +180,7 @@ int move_ghost_charged(board_t* board, int ghost_index, char direction) {
     int y = ghost->pos_y;
     int new_x = x;
     int new_y = y;
-    int result;
+    int result=0;
 
     ghost->charged = 0; //uncharge
 
