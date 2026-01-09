@@ -4,41 +4,29 @@
 #include "debug.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <ctype.h>
 #include <pthread.h>
 #include <stdbool.h>
 #include <unistd.h>
-#include <signal.h>
+#include <pthread.h>
 
 Board board;
 bool stop_execution = false;
 int tempo;
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 
-static volatile sig_atomic_t sigint_received = 0;
-void client_sig_handler(int sig) {
-    if (sig == SIGINT) {
-        sigint_received = 1;
-    }
-}
-
 static void *receiver_thread(void *arg) {
     (void)arg;
-    sigset_t mask;
-    sigemptyset(&mask);
-    sigaddset(&mask, SIGUSR1);
-    sigaddset(&mask, SIGINT);
-    pthread_sigmask(SIG_BLOCK, &mask, NULL);
 
     while (true) {
-
-        if (sigint_received) {
-            pthread_exit(NULL);
-        }
+        
         Board board = receive_board_update();
 
         if (board.game_over > 1 || !board.data){
+            pthread_mutex_lock(&mutex);
             stop_execution = true;
+            pthread_mutex_unlock(&mutex);
             break;
         }
 
@@ -62,15 +50,6 @@ int main(int argc, char *argv[]) {
             "Usage: %s <client_id> <register_pipe> [commands_file]\n",
             argv[0]);
         return 1;
-    }
-
-    struct sigaction sa;
-    sa.sa_handler = client_sig_handler;
-    sigemptyset(&sa.sa_mask);
-    sa.sa_flags = 0;  // Sem SA_RESTART para interromper read
-    if (sigaction(SIGINT, &sa, NULL) == -1) {
-        perror("sigaction SIGINT failed");
-        return EXIT_FAILURE;
     }
 
     const char *client_id = argv[1];
@@ -116,13 +95,6 @@ int main(int argc, char *argv[]) {
     int ch;
 
     while (1) {
-        if (sigint_received) {
-            stop_execution = true;
-            if (pacman_disconnect() == -1) {
-                perror("[ERR]: client disconnect error");
-                return EXIT_FAILURE;
-            }
-        }
         pthread_mutex_lock(&mutex);
         if (stop_execution) {
             pthread_mutex_unlock(&mutex);
@@ -169,13 +141,7 @@ int main(int argc, char *argv[]) {
         if (command == '\0')
             continue;
 
-        if (command == 'Q') {
-            if (pacman_disconnect() == -1) {
-                perror("[ERR]: client disconnect error");
-                return EXIT_FAILURE;
-            }
-            stop_execution = true;
-        }
+
         debug("Command: %c\n", command);
 
         pthread_mutex_lock(&mutex);
@@ -195,10 +161,10 @@ int main(int argc, char *argv[]) {
 
     pthread_mutex_destroy(&mutex);
 
-    // if (pacman_disconnect() == -1) {
-    //     perror("[ERR]: client disconnect error");
-    //     return EXIT_FAILURE;
-    // }
+    if (pacman_disconnect() == -1) {
+        perror("[ERR]: client disconnect error");
+        return EXIT_FAILURE;
+    }
     terminal_cleanup();
 
     return EXIT_SUCCESS;
