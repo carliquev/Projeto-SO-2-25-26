@@ -45,6 +45,7 @@ typedef struct {
     pthread_mutex_t lock;
 } session_t;
 
+
 typedef struct {
     board_t *board;
     session_t *session;
@@ -82,7 +83,6 @@ session_t** sessions;
 int max_sessions = 0;
 int active = 0;
 static volatile sig_atomic_t sigusr1_received = 0;
-static volatile sig_atomic_t sigint_received = 0;
 pthread_mutex_t sessions_lock = PTHREAD_MUTEX_INITIALIZER;
 
 
@@ -360,11 +360,11 @@ void* pacman_thread(void *arg) {
 
         pthread_rwlock_rdlock(&board->state_lock);
 
-        // if (play->command == 'Q') {
-        //     board->state = QUIT_GAME;
-        //     pthread_rwlock_unlock(&board->state_lock);
-        //     pthread_exit(NULL);
-        // }
+        if (play->command == 'Q') {
+            board->state = QUIT_GAME;
+            pthread_rwlock_unlock(&board->state_lock);
+            pthread_exit(NULL);
+        }
 
         int result = move_pacman(board, 0, play);
         if (result == REACHED_PORTAL) {
@@ -426,7 +426,6 @@ void* session_thread(void *arg) {
     sigset_t mask;
     sigemptyset(&mask);
     sigaddset(&mask, SIGUSR1);
-    sigaddset(&mask, SIGINT);
     pthread_sigmask(SIG_BLOCK, &mask, NULL);
 
     session_thread_arg_t *session_arg = (session_thread_arg_t*) arg;
@@ -438,15 +437,13 @@ void* session_thread(void *arg) {
     srand((unsigned int)time(NULL));
 
     while (true) {
-        if (sigint_received) {
-            break;
-        }
         bool next_client = false;
         sem_wait(&semaforo_clientes);
         int req_rx, notif_tx, client_id;
         int result = dequeue_registration(&req_rx, &notif_tx, &client_id);
         if (result == -1) {
             sem_post(&semaforo_clientes);
+            sleep_ms(100);
             continue;
         }
 
@@ -471,6 +468,7 @@ void* session_thread(void *arg) {
         session->notif_tx = notif_tx;
         session->thread_shutdown = 0;
         session->error = 0;
+
         session->id = client_id;
         session->points = malloc(sizeof(int));
         *session->points = 0;
@@ -524,9 +522,6 @@ void* session_thread(void *arg) {
 
         struct dirent* entry;
         while ((entry = readdir(level_dir)) != NULL && !end_game) {
-            if (sigint_received) {
-                break;
-            }
             if (entry->d_name[0] == '.') continue;
 
             char *dot = strrchr(entry->d_name, '.');
@@ -542,9 +537,6 @@ void* session_thread(void *arg) {
                 // refresh_screen();
 
                 while(true) {
-                    if (sigint_received) {
-                        break;
-                    }
                     pthread_t ncurses_tid, pacman_tid;
                     pthread_t *ghost_tids = malloc(game_board.n_ghosts * sizeof(pthread_t));
 
@@ -638,34 +630,27 @@ void* session_thread(void *arg) {
             sem_post(&semaforo_clientes);
             continue;
         }
-        if (sigint_received) {
-            closedir(level_dir);
-            close(req_rx);
-            close(notif_tx);
-            pthread_mutex_destroy(&session->lock);
-            break;
-        }
 
         // Se já não há mais níveis
         board_t end_board;
         memset(&end_board, 0, sizeof(board_t));
         update_client(session, &end_board, ENDGAME);
         //receber disconnect
-        // while (true) {
-        //     char msg;
-        //     ssize_t bytes_read = read(req_rx, &msg, 1);
-        //
-        //     if (bytes_read == 1) {
-        //         if (msg == '2') break;
-        //         continue;
-        //     }
-        //     if (bytes_read == 0) {
-        //         break;
-        //     }
-        //     if (errno == EINTR) continue;
-        //     perror("[ERR]: read disconnect failed");
-        //     break;
-        // }
+        while (true) {
+            char msg;
+            ssize_t bytes_read = read(req_rx, &msg, 1);
+
+            if (bytes_read == 1) {
+                if (msg == '2') break;
+                continue;
+            }
+            if (bytes_read == 0) {
+                break;
+            }
+            if (errno == EINTR) continue;
+            perror("[ERR]: read disconnect failed");
+            break;
+        }
 
         close(req_rx);
         close(notif_tx);
@@ -677,9 +662,6 @@ void* session_thread(void *arg) {
         session->active = false;
         pthread_mutex_unlock(&sessions_lock);
         sem_post(&semaforo_clientes);
-    }
-    if (session_arg) {
-        free(session_arg);
     }
     pthread_exit(NULL);
 }
@@ -738,9 +720,6 @@ void sig_handler(int sig) {
     if (sig == SIGUSR1) {
         sigusr1_received = 1;
     }
-    else if (sig == SIGINT) {
-        sigint_received = 1;
-    }
 }
 
 void hosting(int reg_rx,char *reg_pipe_pathname) {
@@ -749,8 +728,6 @@ void hosting(int reg_rx,char *reg_pipe_pathname) {
         if (sigusr1_received) {
             sigusr1_received = 0;
             top5_generator();
-        } if (sigint_received) {
-            break;
         }
         msg_registration_t msg_reg;
         ssize_t ret = read(reg_rx, &msg_reg, sizeof(msg_registration_t));
@@ -765,13 +742,11 @@ void hosting(int reg_rx,char *reg_pipe_pathname) {
             continue;
         } if (ret == -1) {
             if (errno == EINTR) {
-                if (sigint_received) {
-                    break;
-                }
                 continue;
             }
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
                 // Sem dados disponíveis, espera um pouco
+                sleep_ms(100);
                 continue;
             }
             fprintf(stderr, "[ERR]: read failed: %s\n", strerror(errno));
@@ -783,7 +758,10 @@ void hosting(int reg_rx,char *reg_pipe_pathname) {
         int req_rx = 0;
         while (true) {
             req_rx = open(msg_reg.req_pipe_path, O_RDONLY | O_NONBLOCK);
-            if (req_rx == -1 && errno != ENXIO) {
+            if (req_rx == -1 && errno == ENXIO) {
+                sleep_ms(100);
+            }
+            else if (req_rx == -1) {
                 perror("[ERR]: req_pipe open failed");
                 valid = false;
                 break;
@@ -801,7 +779,10 @@ void hosting(int reg_rx,char *reg_pipe_pathname) {
         int notif_tx = 0;
         while (true) {
             notif_tx = open(msg_reg.notif_pipe_path, O_WRONLY | O_NONBLOCK);
-            if (notif_tx == -1 && errno != ENXIO) {
+            if (notif_tx == -1 && errno == ENXIO) {
+                sleep_ms(100);
+            }
+            else if (notif_tx == -1) {
                 perror("[ERR]: req_pipe open failed");
                 valid = false;
                 break;
@@ -850,11 +831,6 @@ int main(int argc, char** argv) {
         perror("sigaction failed");
         return EXIT_FAILURE;
     }
-    sa.sa_flags = 0;
-    if (sigaction(SIGINT, &sa, NULL) == -1) {
-        perror("sigaction SIGINT failed");
-        return EXIT_FAILURE;
-    }
 
     int max_games = atoi(argv[2]);
     max_sessions = max_games;
@@ -886,15 +862,6 @@ int main(int argc, char** argv) {
 
     int reg_rx = open(reg_pipe_pathname, O_RDONLY);
     if (reg_rx == -1) {
-        // Open foi interrompido por signal
-        if (errno == EINTR) {
-            // Ctrl+C
-            if (sigint_received) {
-                free(sessions);
-                close_debug_file();
-                return EXIT_SUCCESS;
-            }
-        }
         perror("[ERR]: open failed");
         return EXIT_FAILURE;
         //exit(EXIT_FAILURE);
@@ -913,9 +880,9 @@ int main(int argc, char** argv) {
 
     hosting(reg_rx, argv[3]);
 
-    // for (int i = 0; i < max_games; i++) {
-    //     pthread_cancel(session_tids[i]);
-    // }
+    for (int i = 0; i < max_games; i++) {
+        pthread_cancel(session_tids[i]);
+    }
     for (int i=0; i < max_games; i++) {
         if (sessions[i] != NULL) {
             free(sessions[i]);
