@@ -334,12 +334,11 @@ void* pacman_thread(void *arg) {
         msg_play_t msg_play;
 
         int ret = read_msg(req_rx, &msg_play, sizeof(msg_play_t));
-        //EOF
         if (ret == -1 || msg_play.op_code == OP_CODE_DISCONNECT) {
             pthread_rwlock_rdlock(&board->state_lock);
             board->state = QUIT_GAME;
             pthread_rwlock_unlock(&board->state_lock);
-            pthread_exit(NULL);
+            session->error = 1;
         }
 
         c.command = msg_play.command;
@@ -551,10 +550,10 @@ void* session_thread(void *arg) {
                         ghost_arg->session = session;
                         pthread_create(&ghost_tids[i], NULL, ghost_thread, (void*) ghost_arg);
                     }
-                    updates_thread_arg_t *ncurses_arg = malloc(sizeof(updates_thread_arg_t));
-                    ncurses_arg->board = &game_board;
-                    ncurses_arg->session = session;
-                    pthread_create(&ncurses_tid, NULL, updates_thread, (void*) ncurses_arg);
+                    updates_thread_arg_t *updates_arg = malloc(sizeof(updates_thread_arg_t));
+                    updates_arg->board = &game_board;
+                    updates_arg->session = session;
+                    pthread_create(&ncurses_tid, NULL, updates_thread, (void*) updates_arg);
 
                     pthread_join(pacman_tid, NULL);
 
@@ -706,7 +705,10 @@ void top5_generator() {
         char line[LINE_MAX];
         snprintf(line, LINE_MAX ,"ID: %d, Pontos: %d\n",
                 session->id, *points_ptr);
-        write(fd, line, strlen(line));
+        int check = write(fd, line, strlen(line));
+        if (check == -1) {
+            fprintf(stderr, "[ERR]: write failed: %s\n", strerror(errno));
+        }
     }
     close(fd);
 }

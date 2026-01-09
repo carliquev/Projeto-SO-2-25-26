@@ -138,12 +138,11 @@ int read_pacman(board_t* board, int points) {
     pacman->alive = 1;
     pacman->points = points;
 
-    // no file was provided -> defaults 
+    // se nao houver ficheiro pacman
     if (board->pacman_file[0] == '\0') {
         pacman->passo = 0;
         pacman->waiting = 0;
-        pacman->n_moves = 0; // user controlled
-        // default position -> find first non occupied cell
+        pacman->n_moves = 0;
         for (int i = 0; i < board->height; i++) {
             for (int j = 0; j < board->width; j++) {
                 int idx = i * board->width + j;
@@ -161,17 +160,13 @@ int read_pacman(board_t* board, int points) {
     }
 
      int fd = open(board->pacman_file, O_RDONLY);
-    //
      int read;
      char command[MAX_COMMAND_LENGTH];
      while ((read = read_line(fd, command)) > 0) {
-    //     // comment
-         if (command[0] == '#' || command[0] == '\0') continue;
-    //
+         if (command[0] == '#' || command[0] == '\0') continue; //passa linhas desnecessarias
         char *word = strtok(command, " \t\n");
-         if (!word) continue;  // skip empty line
-    //
-         if (strcmp(word, "PASSO") == 0) {
+         if (!word) continue;  // passa linhas vazias
+         if (strcmp(word, "PASSO") == 0) { //le o passo
              char *arg = strtok(NULL, " \t\n");
             if (arg) {
                  pacman->passo = atoi(arg);
@@ -179,7 +174,7 @@ int read_pacman(board_t* board, int points) {
                  debug("Pacman passo: %d\n", pacman->passo);
              }
          }
-         else if (strcmp(word, "POS") == 0) {
+         else if (strcmp(word, "POS") == 0) { //le a posiçao inicial
              char *arg1 = strtok(NULL, " \t\n");
              char *arg2 = strtok(NULL, " \t\n");
              if (arg1 && arg2) {
@@ -227,6 +222,7 @@ int read_pacman(board_t* board, int points) {
     // }
     // pacman->n_moves = move;
     //
+
     pacman->n_moves = 0;
      if (read == -1) {
          debug("Failed reading line\n");
