@@ -148,7 +148,7 @@ void pacman_play(char command) {
   int notif_write = write_msg(session.req_pipe, &msg_play, sizeof(msg_play_t));
   if (notif_write < 0) {
     perror("[ERR]: write failed");
-    //exit(EXIT_FAILURE); TODO THIS PROBABLY WONT GO WELL ////////////////////////////////////////////////////////////////////////////////////
+    //exit(EXIT_FAILURE); TODO
   }
 }
 

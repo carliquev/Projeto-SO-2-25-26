@@ -32,7 +32,6 @@
 #define TOP_SESSIONS 5
 
 
-//int array?
 #define NOTIF_SIZE 8
 
 typedef struct {
@@ -67,20 +66,31 @@ typedef struct {
     session_t *session;
 } ncurses_thread_arg_t;
 
-typedef struct {
-    int *rx;
-    char directory_name[MAX_FILENAME];
-    char reg_pipe_path[MAX_PIPE_PATH_LENGTH];
-} host_thread_arg_t;
+// typedef struct {
+//     int *rx;
+//     char directory_name[MAX_FILENAME];
+//     char reg_pipe_path[MAX_PIPE_PATH_LENGTH];
+// } host_thread_arg_t;
 
 
 typedef struct {
     char directory_name[MAX_FILENAME];
-    session_state_t *session_state;
+    int thread_id;
 } session_thread_arg_t;
 
-session_state_t* sessions[MAX_SESSIONS];
-int connected = 0;
+typedef struct registration_node {
+    int req_rx;
+    int notif_tx;
+    int client_id;
+    struct registration_node *next;
+} registration_node_t;
+
+registration_node_t *queue_head = NULL;
+registration_node_t *queue_tail = NULL;
+pthread_mutex_t queue_lock = PTHREAD_MUTEX_INITIALIZER;
+
+session_state_t** sessions;
+int max_sessions = 0;
 int active = 0;
 static volatile sig_atomic_t sigusr1_received = 0;
 pthread_mutex_t sessions_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -88,6 +98,60 @@ pthread_mutex_t sessions_lock = PTHREAD_MUTEX_INITIALIZER;
 
 sem_t semaforo_clientes;
 pthread_mutex_t mutex_clientes;
+
+void enqueue_registration(int req_rx, int notif_tx, int client_id) {
+    registration_node_t *new_node = malloc(sizeof(registration_node_t));
+    if (new_node == NULL) {
+        fprintf(stderr, "[ERR]: malloc failed for registration node\n");
+        return;
+    }
+
+    new_node->req_rx = req_rx;
+    new_node->notif_tx = notif_tx;
+    new_node->client_id = client_id;
+    new_node->next = NULL;
+
+    pthread_mutex_lock(&queue_lock);
+
+    if (queue_tail == NULL) {
+        // Fila vazia
+        queue_head = new_node;
+        queue_tail = new_node;
+    } else {
+        // Adiciona ao fim
+        queue_tail->next = new_node;
+        queue_tail = new_node;
+    }
+
+    pthread_mutex_unlock(&queue_lock);
+}
+
+int dequeue_registration(int *req_rx, int *notif_tx, int *client_id) {
+    pthread_mutex_lock(&queue_lock);
+
+    if (queue_head == NULL) {
+        // Fila vazia
+        pthread_mutex_unlock(&queue_lock);
+        return -1;
+    }
+
+    registration_node_t *node = queue_head;
+    *req_rx = node->req_rx;
+    *notif_tx = node->notif_tx;
+    *client_id = node->client_id;
+
+    queue_head = node->next;
+
+    if (queue_head == NULL) {
+        // Era o último nó
+        queue_tail = NULL;
+    }
+
+    pthread_mutex_unlock(&queue_lock);
+
+    free(node);
+    return 0;
+}
 
 
 static int write_msg(int fd, const void *buf, size_t n) {
@@ -286,7 +350,7 @@ void* pacman_thread(void *arg) {
 
         int ret = read_msg(req_rx, &msg_play, sizeof(msg_play_t));
         //EOF
-        if (ret == -1) {
+        if (ret == -1 || msg_play.op_code == OP_CODE_DISCONNECT) {
             pthread_rwlock_rdlock(&board->state_lock);
             board->state = QUIT_GAME;
             pthread_rwlock_unlock(&board->state_lock);
@@ -368,7 +432,6 @@ void* ghost_thread(void *arg) {
 }
 
 void* session_thread(void *arg) {
-
     //inibição de SIGUSR1 nas sessions
     sigset_t mask;
     sigemptyset(&mask);
@@ -378,185 +441,245 @@ void* session_thread(void *arg) {
     session_thread_arg_t *session_arg = (session_thread_arg_t*) arg;
     char directory_name[MAX_FILENAME];
     strcpy(directory_name, session_arg->directory_name);
-    session_state_t *session_state = session_arg->session_state;
-    session_t *session = session_state->session;
-    int req_rx = session->req_rx;
-    int notif_tx = session->notif_tx;
-    session->error = 0;
-
 
     //free(session_arg);
     // Random seed for any random movements
     srand((unsigned int)time(NULL));
 
-    DIR* level_dir = opendir(directory_name);
-
-    if (level_dir == NULL) {
-        fprintf(stderr, "Failed to open directory\n");
-        pthread_mutex_lock(&session->lock);
-        session->error = 1;
-        pthread_mutex_unlock(&session->lock);
-        pthread_mutex_destroy(&session->lock);
-        // free(session);
-        pthread_mutex_lock(&sessions_lock);
-        --active;
-        session_state->active = false;
-        pthread_mutex_unlock(&sessions_lock);
-        sem_post(&semaforo_clientes);
-        pthread_exit(NULL);
-    }
-
-    // terminal_init();
-
-    board_t game_board;
-    int accumulated_points = 0;
-    bool end_game = false;
-
-    // pid_t parent_process = getpid(); // Only the parent process can create backups
-
-    struct dirent* entry;
-    while ((entry = readdir(level_dir)) != NULL && !end_game) {
-        if (entry->d_name[0] == '.') continue;
-
-        char *dot = strrchr(entry->d_name, '.');
-        if (!dot) continue;
-
-        if (strcmp(dot, ".lvl") == 0) {
-            load_level(&game_board, entry->d_name, directory_name, accumulated_points);
-            session_state->points = &(game_board.pacmans[0].points);
-
-            game_board.state = CONTINUE_PLAY;
-            update_client(session, &game_board, DEFAULT);
-            // draw_board(&game_board, DRAW_MENU);
-            // refresh_screen();
-
-            while(true) {
-                pthread_t ncurses_tid, pacman_tid;
-                pthread_t *ghost_tids = malloc(game_board.n_ghosts * sizeof(pthread_t));
-
-
-                session->thread_shutdown = 0;
-
-                debug("Creating threads\n");
-
-                pacman_thread_arg_t *pac_arg = malloc(sizeof(pacman_thread_arg_t));
-                pac_arg->board = &game_board;
-                pac_arg->session = session;
-                pthread_create(&pacman_tid, NULL, pacman_thread, (void*) pac_arg);
-                for (int i = 0; i < game_board.n_ghosts; i++) {
-                    ghost_thread_arg_t *ghost_arg = malloc(sizeof(ghost_thread_arg_t));
-                    ghost_arg->board = &game_board;
-                    ghost_arg->ghost_index = i;
-                    ghost_arg->pacman_tid = pacman_tid;
-                    ghost_arg->session = session;
-                    pthread_create(&ghost_tids[i], NULL, ghost_thread, (void*) ghost_arg);
-                }
-                ncurses_thread_arg_t *ncurses_arg = malloc(sizeof(ncurses_thread_arg_t));
-                ncurses_arg->board = &game_board;
-                ncurses_arg->session = session;
-                pthread_create(&ncurses_tid, NULL, ncurses_thread, (void*) ncurses_arg);
-
-                pthread_join(pacman_tid, NULL);
-
-                int err;
-                pthread_mutex_lock(&session->lock);
-                err = session->error;
-                pthread_mutex_unlock(&session->lock);
-                if (err==1) {
-                    pthread_mutex_lock(&sessions_lock);
-                    --active;
-                    session_state->active = false;
-                    pthread_mutex_unlock(&sessions_lock);
-                    sem_post(&semaforo_clientes);
-                    pthread_exit(NULL);
-                }
-
-                pthread_mutex_lock(&session->lock);
-                session->thread_shutdown = 1;
-                pthread_mutex_unlock(&session->lock);
-
-                pthread_join(ncurses_tid, NULL);
-                // free(ncurses_arg);
-                for (int i = 0; i < game_board.n_ghosts; i++) {
-                    pthread_join(ghost_tids[i], NULL);
-                }
-
-                free(ghost_tids);
-
-                int result = game_board.state;
-
-                if(result == NEXT_LEVEL) {
-                    // screen_refresh(&game_board, DRAW_WIN);
-                    accumulated_points = game_board.pacmans[0].points;
-                    update_client(session, &game_board, VICTORY);
-                    sleep_ms(game_board.tempo);
-                    break;
-                }
-
-                if(result == QUIT_GAME) {
-                    // screen_refresh(&game_board, DRAW_GAME_OVER);
-                    update_client(session, &game_board, GAMEOVER);
-                    sleep_ms(game_board.tempo);
-                    end_game = true;
-                    break;
-                }
-
-                // screen_refresh(&game_board, DRAW_MENU);
-                update_client(session, &game_board, DEFAULT);
-
-            }
-            // print_board(&game_board);
-            // if (game_board.pacmans[0].alive) {
-            //     update_client(session, &game_board, VICTORY);
-            // }
-
-            unload_level(&game_board);
-
-        }
-    }
-
-    // Se já não há mais níveis
-    board_t end_board;
-    memset(&end_board, 0, sizeof(board_t));
-    update_client(session, &end_board, ENDGAME);
-    //receber disconnect
     while (true) {
-        char msg;
-        ssize_t bytes_read = read(req_rx, &msg, 1);
-
-        if (bytes_read == 1) {
-            if (msg == '2') break;
+        bool next_client = false;
+        sem_wait(&semaforo_clientes);
+        int req_rx, notif_tx, client_id;
+        int result = dequeue_registration(&req_rx, &notif_tx, &client_id);
+        if (result == -1) {
+            sem_post(&semaforo_clientes);
+            sleep_ms(100);
             continue;
         }
-        if (bytes_read == 0) {
+
+        msg_reg_response_t response;
+        response.op_code = OP_CODE_CONNECT;
+        response.result = result;
+
+        int response_write = write_msg(notif_tx, &response, sizeof(msg_reg_response_t));
+        if (response_write < 0) {
+            perror("[ERR]: write failed");
+            close(req_rx);
+            close(notif_tx);
+            result = 1;
+        }
+        if (result == 1) {
+            continue;
+        }
+
+        session_t *session = malloc(sizeof(session_t));
+        pthread_mutex_init(&session->lock, NULL);
+        session->req_rx = req_rx;
+        session->notif_tx = notif_tx;
+        session->thread_shutdown = 0;
+        session->error = 0;
+
+        session_state_t *session_state = malloc(sizeof(session_state_t));
+        session_state->id = client_id;
+        session_state->points = malloc(sizeof(int));
+        *session_state->points = 0;
+        session_state->active = true;
+        session_state->session = session;
+
+        //Encontra slot livre no array sessions
+        pthread_mutex_lock(&sessions_lock);
+        int slot = -1;
+        for (int i = 0; i < max_sessions; i++) {
+            if (sessions[i] == NULL || !sessions[i]->active) {
+                if (sessions[i] != NULL) {
+                    free(sessions[i]);
+                }
+                sessions[i] = session_state;
+                slot = i;
+                break;
+            }
+        }
+        ++active;
+        pthread_mutex_unlock(&sessions_lock);
+        if (slot == -1) {
+            fprintf(stderr, "[ERR]: No slot available\n");
+            free(session_state);
+            pthread_mutex_destroy(&session->lock);
+            free(session);
+            sem_post(&semaforo_clientes);
+            exit(EXIT_FAILURE);
+        }
+
+        DIR* level_dir = opendir(directory_name);
+
+        if (level_dir == NULL) {
+            fprintf(stderr, "Failed to open directory\n");
+            pthread_mutex_lock(&session->lock);
+            session->error = 1;
+            pthread_mutex_unlock(&session->lock);
+            pthread_mutex_destroy(&session->lock);
+            pthread_mutex_lock(&sessions_lock);
+            --active;
+            session_state->active = false;
+            pthread_mutex_unlock(&sessions_lock);
+            free(session);
+            sem_post(&semaforo_clientes);
+            continue;
+        }
+
+        // terminal_init();
+
+        board_t game_board;
+        int accumulated_points = 0;
+        bool end_game = false;
+
+        // pid_t parent_process = getpid(); // Only the parent process can create backups
+
+        struct dirent* entry;
+        while ((entry = readdir(level_dir)) != NULL && !end_game) {
+            if (entry->d_name[0] == '.') continue;
+
+            char *dot = strrchr(entry->d_name, '.');
+            if (!dot) continue;
+
+            if (strcmp(dot, ".lvl") == 0) {
+                load_level(&game_board, entry->d_name, directory_name, accumulated_points);
+                session_state->points = &(game_board.pacmans[0].points);
+
+                game_board.state = CONTINUE_PLAY;
+                update_client(session, &game_board, DEFAULT);
+                // draw_board(&game_board, DRAW_MENU);
+                // refresh_screen();
+
+                while(true) {
+                    pthread_t ncurses_tid, pacman_tid;
+                    pthread_t *ghost_tids = malloc(game_board.n_ghosts * sizeof(pthread_t));
+
+                    session->thread_shutdown = 0;
+
+                    debug("Creating threads\n");
+
+                    pacman_thread_arg_t *pac_arg = malloc(sizeof(pacman_thread_arg_t));
+                    pac_arg->board = &game_board;
+                    pac_arg->session = session;
+                    pthread_create(&pacman_tid, NULL, pacman_thread, (void*) pac_arg);
+                    for (int i = 0; i < game_board.n_ghosts; i++) {
+                        ghost_thread_arg_t *ghost_arg = malloc(sizeof(ghost_thread_arg_t));
+                        ghost_arg->board = &game_board;
+                        ghost_arg->ghost_index = i;
+                        ghost_arg->pacman_tid = pacman_tid;
+                        ghost_arg->session = session;
+                        pthread_create(&ghost_tids[i], NULL, ghost_thread, (void*) ghost_arg);
+                    }
+                    ncurses_thread_arg_t *ncurses_arg = malloc(sizeof(ncurses_thread_arg_t));
+                    ncurses_arg->board = &game_board;
+                    ncurses_arg->session = session;
+                    pthread_create(&ncurses_tid, NULL, ncurses_thread, (void*) ncurses_arg);
+
+                    pthread_join(pacman_tid, NULL);
+
+                    pthread_mutex_lock(&session->lock);
+                    int* err = &session->error;
+                    pthread_mutex_unlock(&session->lock);
+                    if (*err==1) {
+                        free(ghost_tids);
+                        next_client = true;
+                        break;
+                    }
+
+                    pthread_mutex_lock(&session->lock);
+                    session->thread_shutdown = 1;
+                    pthread_mutex_unlock(&session->lock);
+
+                    pthread_join(ncurses_tid, NULL);
+                    // free(ncurses_arg);
+                    for (int i = 0; i < game_board.n_ghosts; i++) {
+                        pthread_join(ghost_tids[i], NULL);
+                    }
+
+                    free(ghost_tids);
+
+                    int result = game_board.state;
+
+                    if(result == NEXT_LEVEL) {
+                        // screen_refresh(&game_board, DRAW_WIN);
+                        accumulated_points = game_board.pacmans[0].points;
+                        update_client(session, &game_board, VICTORY);
+                        sleep_ms(game_board.tempo);
+                        break;
+                    }
+
+                    if(result == QUIT_GAME) {
+                        // screen_refresh(&game_board, DRAW_GAME_OVER);
+                        update_client(session, &game_board, GAMEOVER);
+                        sleep_ms(game_board.tempo);
+                        end_game = true;
+                        break;
+                    }
+
+                    // screen_refresh(&game_board, DRAW_MENU);
+                    update_client(session, &game_board, DEFAULT);
+
+                }
+
+                // print_board(&game_board);
+                // if (game_board.pacmans[0].alive) {
+                //     update_client(session, &game_board, VICTORY);
+                // }
+
+                unload_level(&game_board);
+                if (next_client==true) {
+                    break;
+                }
+            }
+        }
+        if (next_client==true) {
+            pthread_mutex_lock(&sessions_lock);
+            --active;
+            session_state->active = false;
+            pthread_mutex_unlock(&sessions_lock);
+            closedir(level_dir);
+            close(req_rx);
+            close(notif_tx);
+            pthread_mutex_destroy(&session->lock);
+            free(session);
+            sem_post(&semaforo_clientes);
+            continue;
+        }
+
+        // Se já não há mais níveis
+        board_t end_board;
+        memset(&end_board, 0, sizeof(board_t));
+        update_client(session, &end_board, ENDGAME);
+        //receber disconnect
+        while (true) {
+            char msg;
+            ssize_t bytes_read = read(req_rx, &msg, 1);
+
+            if (bytes_read == 1) {
+                if (msg == '2') break;
+                continue;
+            }
+            if (bytes_read == 0) {
+                break;
+            }
+            if (errno == EINTR) continue;
+            perror("[ERR]: read disconnect failed");
             break;
         }
-        if (errno == EINTR) continue;
-        perror("[ERR]: read disconnect failed");
-        break;
-    }
 
-    close(req_rx);
-    close(notif_tx);
-    if (closedir(level_dir) == -1) {
-        fprintf(stderr, "Failed to close directory\n");
-        session->error = 1;
+        close(req_rx);
+        close(notif_tx);
+        closedir(level_dir);
+
         pthread_mutex_destroy(&session->lock);
-        // free(session);
         pthread_mutex_lock(&sessions_lock);
         --active;
         session_state->active = false;
         pthread_mutex_unlock(&sessions_lock);
+        free(session);
         sem_post(&semaforo_clientes);
-        pthread_exit(NULL);
     }
-    pthread_mutex_destroy(&session->lock);
-    // free(session);
-    pthread_mutex_lock(&sessions_lock);
-    --active;
-    session_state->active = false;
-    pthread_mutex_unlock(&sessions_lock);
-    sem_post(&semaforo_clientes);
     pthread_exit(NULL);
 }
 
@@ -580,12 +703,19 @@ int compare_sessions(const void *a, const void *b) {
 void top5_generator() {
     // fprintf(stderr, "Caught SIGSUR1\n");
     pthread_mutex_lock(&sessions_lock);
-    session_state_t* sessions_copy[MAX_SESSIONS];
-    memcpy(sessions_copy, sessions, connected * sizeof(session_state_t*));
+
+    session_state_t* sessions_copy[max_sessions];
+    int count = 0;
+    for (int i = 0; i < max_sessions; i++) {
+        if (sessions[i] != NULL) {
+            sessions_copy[count++] = sessions[i];
+        }
+    }
+
     int active_sessions = active;
     pthread_mutex_unlock(&sessions_lock);
 
-    qsort(sessions_copy, connected, sizeof(session_state_t*), compare_sessions);
+    qsort(sessions_copy, count, sizeof(session_state_t*), compare_sessions);
 
     int fd = open("topPlayers.txt", O_CREAT|O_TRUNC|O_WRONLY, 0644);
     int top_n;
@@ -610,50 +740,25 @@ void sig_handler(int sig) {
     }
 }
 
-void* host_thread(void *arg) {
-    host_thread_arg_t *host_arg = (host_thread_arg_t*) arg;
-    int *reg_rx = host_arg->rx;
-    char *reg_pipe_pathname = host_arg->reg_pipe_path;
-    char directory_name[MAX_FILENAME];
-
-    strcpy(directory_name, host_arg->directory_name);
-    int result = 0;
-    // free(host_arg);
-
+void hosting(int reg_rx,char *reg_pipe_pathname) {
     while (true) {
+        int result = 0;
         if (sigusr1_received) {
             sigusr1_received = 0;
             top5_generator();
         }
         msg_registration_t msg_reg;
-        ssize_t ret = read(*reg_rx, &msg_reg, sizeof(msg_registration_t));
-
+        ssize_t ret = read(reg_rx, &msg_reg, sizeof(msg_registration_t));
         if (ret == 0) {
             // All writers disconnected → FIFO reached EOF
-            close(*reg_rx);
-
+            close(reg_rx);
             // Reopen FIFO (still read-only)
             do {
-                *reg_rx = open(reg_pipe_pathname, O_RDONLY | O_NONBLOCK);
-            } while (*reg_rx == -1 && errno == EINTR);
+                reg_rx = open(reg_pipe_pathname, O_RDONLY | O_NONBLOCK);
+            } while (reg_rx == -1 && errno == EINTR);
 
             continue;
-        }
-
-        if (ret == -1) {
-            if (errno == EINTR)
-                continue;
-
-            if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                sleep_ms(100);
-                continue;
-            }
-
-            perror("[ERR]: read failed");
-            continue;
-        }
-
-        if (ret == -1) {
+        } if (ret == -1) {
             if (errno == EINTR) {
                 continue;
             }
@@ -662,16 +767,11 @@ void* host_thread(void *arg) {
                 sleep_ms(100);
                 continue;
             }
-            // ret == -1 indicates error
             fprintf(stderr, "[ERR]: read failed: %s\n", strerror(errno));
+            // continue
             result = 1;
         }
-        // else if (ret==0) {
-        //     sleep_ms(100);
-        //     continue;
-        // }
 
-        sem_wait(&semaforo_clientes);
         bool valid = true;
         int req_rx = 0;
         while (true) {
@@ -714,6 +814,8 @@ void* host_thread(void *arg) {
         flags = fcntl(notif_tx, F_GETFL, 0);
         fcntl(notif_tx, F_SETFL, flags & ~O_NONBLOCK);
 
+        if (result==1) continue;
+
         char client_id_char[MAX_PIPE_PATH_LENGTH];
         int parsed = sscanf(msg_reg.req_pipe_path, "/tmp/%s_request", client_id_char);
         if (parsed != 1) {
@@ -722,55 +824,10 @@ void* host_thread(void *arg) {
         }
 
         int client_id = atoi(client_id_char);
-        // // se já existir client com o mesmo id
-        // if (sessions[client_id]) {
-        //     if (sessions[client_id]->active){
-        //         result = 1;
-        //         perror("[ERR]: duplicate client id");
-        //     }
-        // }
-
-        pthread_t session_tid;
-        session_t *session = malloc(sizeof(session_t));
-        pthread_mutex_init(&session->lock, NULL);
-        session_thread_arg_t *s_arg = malloc(sizeof(session_thread_arg_t));
-        strcpy(s_arg->directory_name, directory_name);
-        session->req_rx = req_rx;
-        session->notif_tx = notif_tx;
-        session->thread_shutdown = 0;
-        session->error = 0;
-
-        msg_reg_response_t response;
-        response.op_code = msg_reg.op_code;
-        response.result = result;
-
-        int response_write = write_msg(notif_tx, &response, sizeof(msg_reg_response_t));
-        if (response_write < 0) {
-            perror("[ERR]: write failed");
-            exit(EXIT_FAILURE);
-        }
-        if (result == 1) {
-            sem_post(&semaforo_clientes);
-            continue;
-        }
-
-        session_state_t *session_state = malloc(sizeof(session_state_t));
-        session_state->id = client_id;
-        session_state->points = malloc(sizeof(int));
-        *session_state->points = 0;
-        session_state->active = true;
-        session_state->session = session;
 
 
-        sessions[connected] = session_state;
-        ++connected;
-        ++active;
+        enqueue_registration(req_rx, notif_tx, client_id);
 
-        s_arg->session_state = session_state;
-
-        pthread_create(&session_tid, NULL, session_thread, (void*) s_arg);
-        pthread_detach(session_tid);
-        // pthread_join(session_tid, NULL);
     }
     pthread_exit(NULL);
 }
@@ -794,6 +851,11 @@ int main(int argc, char** argv) {
     }
 
     int max_games = atoi(argv[2]);
+    max_sessions = max_games;
+    sessions = malloc(max_games * sizeof(session_state_t*));
+    for (int i = 0; i < max_games; i++) {
+        sessions[i] = NULL;
+    }
     // Inicializa semaforo
     sem_init(&semaforo_clientes, 0, max_games);
     open_debug_file("debug.log");
@@ -826,13 +888,22 @@ int main(int argc, char** argv) {
     int flags = fcntl(reg_rx, F_GETFL, 0);
     fcntl(reg_rx, F_SETFL, flags | O_NONBLOCK);
 
-    pthread_t host_tid;
-    host_thread_arg_t *arg = malloc(sizeof(host_thread_arg_t));
-    arg->rx = &reg_rx;
-    strcpy(arg->directory_name, argv[1]);
-    strcpy(arg->reg_pipe_path, argv[3]);
-    pthread_create(&host_tid, NULL, host_thread, (void*) arg);
-    pthread_join(host_tid, NULL);
+    pthread_t *session_tids = malloc(max_games * sizeof(pthread_t));
+    for (int i = 0; i < max_games; i++) {
+        session_thread_arg_t *s_arg = malloc(sizeof(session_thread_arg_t));
+        strcpy(s_arg->directory_name, argv[1]);
+        s_arg->thread_id = i;
+        pthread_create(&session_tids[i], NULL, session_thread, (void*) s_arg);
+    }
+
+    hosting(reg_rx, argv[3]);
+
+    for (int i = 0; i < max_games; i++) {
+        pthread_cancel(session_tids[i]);
+    }
+    free(session_tids);
+    free(sessions);
+
     close_debug_file();
     return 0;
 }
