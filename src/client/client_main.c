@@ -4,12 +4,10 @@
 #include "debug.h"
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <ctype.h>
 #include <pthread.h>
 #include <stdbool.h>
 #include <unistd.h>
-#include <pthread.h>
 
 Board board;
 bool stop_execution = false;
@@ -20,8 +18,8 @@ static void *receiver_thread(void *arg) {
     (void)arg;
 
     while (true) {
-        
-        Board board = receive_board_update();
+
+        board = receive_board_update();
 
         if (board.game_over > 1 || !board.data){
             pthread_mutex_lock(&mutex);

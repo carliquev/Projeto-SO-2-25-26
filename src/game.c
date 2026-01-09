@@ -61,7 +61,7 @@ typedef struct {
 typedef struct {
     board_t *board;
     session_t *session;
-} ncurses_thread_arg_t;
+} updates_thread_arg_t;
 
 typedef struct {
     char directory_name[MAX_FILENAME];
@@ -142,7 +142,17 @@ int dequeue_registration(int *req_rx, int *notif_tx, int *client_id) {
     free(node);
     return 0;
 }
-
+// void send_char_msg(int fd, char const *str, ssize_t len) {
+//     ssize_t written = 0;
+//     while (written < len) {
+//         ssize_t ret = write(fd, str + written, len - written);
+//         if (ret < 0) {
+//             perror("[ERR]: write failed");
+//             exit(EXIT_FAILURE);
+//         }
+//         written += ret;
+//     }
+// }
 
 static int write_msg(int fd, const void *buf, size_t n) {
     size_t off = 0;
@@ -230,21 +240,6 @@ void screen_refresh(board_t * game_board, int mode) {
     refresh_screen();
 }
 
-void send_msg(int fd, char const *str, ssize_t len) {
-    ssize_t written = 0;
-
-    while (written < len) {
-        ssize_t ret = write(fd, str + written, len - written);
-        if (ret < 0) {
-            perror("[ERR]: write failed");
-            exit(EXIT_FAILURE);
-            //TODO ////////////////////////////////////////////////////////////////////////////////////////////
-        }
-
-        written += ret;
-    }
-}
-
 int update_client(session_t *session, board_t *game_board, int mode) {
     int notif_pipe_fd = session->notif_tx;
 
@@ -285,17 +280,17 @@ int update_client(session_t *session, board_t *game_board, int mode) {
         return -1;
     }
     if (mode!=ENDGAME) {
-        send_msg(notif_pipe_fd, board_data, msg.width * msg.height);
+        write_msg(notif_pipe_fd, board_data, msg.width * msg.height);
     }
     pthread_mutex_unlock(&session->lock);
     if (board_data) free(board_data);
     return 0;
 }
 
-void* ncurses_thread(void *arg) {
-    ncurses_thread_arg_t *ncurses_thread_arg = (ncurses_thread_arg_t *) arg;
-    board_t *board = ncurses_thread_arg->board;
-    session_t *session = ncurses_thread_arg->session;
+void* updates_thread(void *arg) {
+    updates_thread_arg_t *updates_thread_arg = (updates_thread_arg_t *) arg;
+    board_t *board = updates_thread_arg->board;
+    session_t *session = updates_thread_arg->session;
 
     sleep_ms(board->tempo / 2);
     while (true) {
@@ -556,10 +551,10 @@ void* session_thread(void *arg) {
                         ghost_arg->session = session;
                         pthread_create(&ghost_tids[i], NULL, ghost_thread, (void*) ghost_arg);
                     }
-                    ncurses_thread_arg_t *ncurses_arg = malloc(sizeof(ncurses_thread_arg_t));
+                    updates_thread_arg_t *ncurses_arg = malloc(sizeof(updates_thread_arg_t));
                     ncurses_arg->board = &game_board;
                     ncurses_arg->session = session;
-                    pthread_create(&ncurses_tid, NULL, ncurses_thread, (void*) ncurses_arg);
+                    pthread_create(&ncurses_tid, NULL, updates_thread, (void*) ncurses_arg);
 
                     pthread_join(pacman_tid, NULL);
 
