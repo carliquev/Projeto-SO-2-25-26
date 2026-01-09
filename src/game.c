@@ -14,6 +14,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <semaphore.h>
+#include <bits/posix2_lim.h>
 
 
 #define CONTINUE_PLAY 0
@@ -586,6 +587,7 @@ void top5_generator() {
 
     qsort(sessions_copy, connected, sizeof(session_state_t*), compare_sessions);
 
+    int fd = open("topPlayers.txt", O_CREAT|O_TRUNC|O_WRONLY, 0644);
     int top_n;
     if (active_sessions < TOP_SESSIONS) {
         top_n = active_sessions;
@@ -594,10 +596,12 @@ void top5_generator() {
     for (int i = 0; i < top_n; i++) {
         session_state_t* session_state = sessions_copy[i];
         int * points_ptr = session_state->points;
-        printf("ID: %d, Pontos: %d\n",
+        char line[LINE_MAX];
+        snprintf(line, LINE_MAX ,"ID: %d, Pontos: %d\n",
                 session_state->id, *points_ptr);
+        write(fd, line, strlen(line));
     }
-    printf("\n");
+    close(fd);
 }
 
 void sig_handler(int sig) {
