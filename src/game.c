@@ -333,6 +333,8 @@ void* pacman_thread(void *arg) {
             board->state = QUIT_GAME;
             pthread_rwlock_unlock(&board->state_lock);
             session->error = 1;
+            session->thread_shutdown = 1;
+            pthread_exit(NULL);
         }
 
         c.command = msg_play.command;
@@ -523,7 +525,7 @@ void* session_thread(void *arg) {
                 update_client(session, &game_board, DEFAULT);
 
                 while(true) {
-                    pthread_t ncurses_tid, pacman_tid;
+                    pthread_t update_tid, pacman_tid;
                     pthread_t *ghost_tids = malloc(game_board.n_ghosts * sizeof(pthread_t));
 
                     session->thread_shutdown = 0;
@@ -545,7 +547,7 @@ void* session_thread(void *arg) {
                     updates_thread_arg_t *updates_arg = malloc(sizeof(updates_thread_arg_t));
                     updates_arg->board = &game_board;
                     updates_arg->session = session;
-                    pthread_create(&ncurses_tid, NULL, updates_thread, (void*) updates_arg);
+                    pthread_create(&update_tid, NULL, updates_thread, (void*) updates_arg);
 
                     pthread_join(pacman_tid, NULL);
 
@@ -562,7 +564,7 @@ void* session_thread(void *arg) {
                     session->thread_shutdown = 1;
                     pthread_mutex_unlock(&session->lock);
 
-                    pthread_join(ncurses_tid, NULL);
+                    pthread_join(update_tid, NULL);
                     // free(ncurses_arg);
                     for (int i = 0; i < game_board.n_ghosts; i++) {
                         pthread_join(ghost_tids[i], NULL);
