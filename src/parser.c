@@ -31,7 +31,11 @@ int read_level(board_t* board, char* filename, char* dirname) {
 
     int read;
     while ((read = read_line(fd, command)) > 0) {
-
+        if (read == -1){
+            debug("Error reading command\n");
+            close(fd);
+            return -1;
+        }
         // comment
         if (command[0] == '#' || command[0] == '\0') continue;
 
@@ -175,6 +179,7 @@ int read_pacman(board_t* board, int points) {
      int read;
      char command[MAX_COMMAND_LENGTH];
      while ((read = read_line(fd, command)) > 0) {
+         if (read == -1){perror("Unable to read"); exit(EXIT_FAILURE);}
          if (command[0] == '#' || command[0] == '\0') continue; //passa linhas desnecessarias
         char *word = strtok(command, " \t\n");
          if (!word) continue;  // passa linhas vazias
@@ -255,6 +260,10 @@ int read_ghosts(board_t* board) {
         int read;
         char command[MAX_COMMAND_LENGTH];
         while ((read = read_line(fd, command)) > 0) {
+            if (read == -1){
+                perror("Unable to read");
+                return -1;
+            }
             // comment
             if (command[0] == '#' || command[0] == '\0') continue;
 
@@ -332,6 +341,9 @@ int read_line(int fd, char *buf) {
     ssize_t n;
 
     while ((n = read(fd, &c, 1)) == 1) {
+        if (n == -1){ //////////////////////////////////////////////////////////////////////////////////////////////
+            return -1;
+        }
         if (c == '\r') continue;
         if (c == '\n') break;
         buf[i++] = c;

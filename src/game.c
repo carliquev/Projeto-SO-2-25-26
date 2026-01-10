@@ -555,7 +555,11 @@ void* session_thread(void *arg) {
                     }
                     pac_arg->board = &game_board;
                     pac_arg->session = session;
-                    pthread_create(&pacman_tid, NULL, pacman_thread, (void*) pac_arg);
+                    int pac_thread_create_check = pthread_create(&pacman_tid, NULL, pacman_thread, (void*) pac_arg);
+                    if (pac_thread_create_check == -1){ //////////////////////////////////////////////////////////////////////////////////////////////////////////
+                        perror("Failed to create pacman thread");
+                        exit(EXIT_FAILURE);
+                    }
                     for (int i = 0; i < game_board.n_ghosts; i++) {
                         ghost_thread_arg_t *ghost_arg = malloc(sizeof(ghost_thread_arg_t));
                         if (ghost_arg == NULL){
@@ -566,7 +570,11 @@ void* session_thread(void *arg) {
                         ghost_arg->ghost_index = i;
                         ghost_arg->pacman_tid = pacman_tid;
                         ghost_arg->session = session;
-                        pthread_create(&ghost_tids[i], NULL, ghost_thread, (void*) ghost_arg);
+                        int ghost_thread_create_check = pthread_create(&ghost_tids[i], NULL, ghost_thread, (void*) ghost_arg);
+                        if (ghost_thread_create_check == -1){ //////////////////////////////////////////////////////////////////////////////////////////////////////////
+                            perror("Failed to create pacman thread");
+                            exit(EXIT_FAILURE);
+                        }
                     }
                     updates_thread_arg_t *updates_arg = malloc(sizeof(updates_thread_arg_t));
                     if (updates_arg == NULL){
@@ -575,7 +583,11 @@ void* session_thread(void *arg) {
                     }
                     updates_arg->board = &game_board;
                     updates_arg->session = session;
-                    pthread_create(&update_tid, NULL, updates_thread, (void*) updates_arg);
+                    int update_thread_create_check = pthread_create(&update_tid, NULL, updates_thread, (void*) updates_arg);
+                    if (update_thread_create_check == -1){ //////////////////////////////////////////////////////////////////////////////////////////////////////////
+                        perror("Failed to create pacman thread");
+                        exit(EXIT_FAILURE);
+                    }
 
                     pthread_join(pacman_tid, NULL);
 
@@ -645,7 +657,10 @@ void* session_thread(void *arg) {
         while (true) {
             char msg;
             ssize_t bytes_read = read(req_rx, &msg, 1);
-
+            if (bytes_read == -1){/////////////////////////////////////////////////////////////////////////
+                perror("Unable to read request pipe");
+                exit(EXIT_FAILURE);
+            }
             if (bytes_read == 1) {
                 if (msg == '2') break;
                 continue;
@@ -896,7 +911,11 @@ int main(int argc, char** argv) {
         }
         strcpy(s_arg->directory_name, argv[1]);
         s_arg->thread_id = i;
-        pthread_create(&session_tids[i], NULL, session_thread, (void*) s_arg);
+        int session_thread_create_check = pthread_create(&session_tids[i], NULL, session_thread, (void*) s_arg);
+        if (session_thread_create_check == -1){ //////////////////////////////////////////////////////////////////////////////////////////////////////////
+            perror("Failed to create pacman thread");
+            exit(EXIT_FAILURE);
+        }
     }
 
     hosting(reg_rx, argv[3]);

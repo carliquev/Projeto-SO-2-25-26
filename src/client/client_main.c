@@ -81,7 +81,11 @@ int main(int argc, char *argv[]) {
     }
 
     pthread_t receiver_thread_id;
-    pthread_create(&receiver_thread_id, NULL, receiver_thread, NULL);
+    int receiver_thread_create_check = pthread_create(&receiver_thread_id, NULL, receiver_thread, NULL);
+    if (receiver_thread_create_check == -1){ //////////////////////////////////////////////////////////////////////////////////////////////////////////
+        perror("Failed to create pacman thread");
+        exit(EXIT_FAILURE);
+    }
 
     terminal_init();
     atexit(terminal_cleanup);
