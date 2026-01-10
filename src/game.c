@@ -29,7 +29,7 @@
 #define ENDGAME 3
 
 #define MAX_SESSIONS 100
-#define TOP_SESSIONS 5
+#define LEADERBOARD_SIZE 5
 
 
 #define NOTIF_SIZE 8
@@ -65,7 +65,6 @@ typedef struct {
 
 typedef struct {
     char directory_name[MAX_FILENAME];
-    int thread_id;
 } session_thread_arg_t;
 
 typedef struct registration_node {
@@ -81,7 +80,6 @@ pthread_mutex_t queue_lock = PTHREAD_MUTEX_INITIALIZER;
 
 session_t** sessions;
 int max_sessions = 0;
-int active = 0;
 static volatile sig_atomic_t sigusr1_received = 0;
 pthread_mutex_t sessions_lock = PTHREAD_MUTEX_INITIALIZER;
 
@@ -92,8 +90,8 @@ pthread_mutex_t mutex_clientes;
 void enqueue_registration(int req_rx, int notif_tx, int client_id) {
     registration_node_t *new_node = malloc(sizeof(registration_node_t));
     if (new_node == NULL) {
-        fprintf(stderr, "[ERR]: malloc failed for registration node\n");
-        return;
+        perror("Memory Exceeded\n");
+        exit(EXIT_FAILURE);
     }
 
     new_node->req_rx = req_rx;
@@ -103,12 +101,12 @@ void enqueue_registration(int req_rx, int notif_tx, int client_id) {
 
     pthread_mutex_lock(&queue_lock);
 
+    // Se a fila estiver vazia
     if (queue_tail == NULL) {
-        // Fila vazia
         queue_head = new_node;
         queue_tail = new_node;
     } else {
-        // Adiciona ao fim
+        // Adiciona ao fim da fila
         queue_tail->next = new_node;
         queue_tail = new_node;
     }
@@ -142,17 +140,6 @@ int dequeue_registration(int *req_rx, int *notif_tx, int *client_id) {
     free(node);
     return 0;
 }
-// void send_char_msg(int fd, char const *str, ssize_t len) {
-//     ssize_t written = 0;
-//     while (written < len) {
-//         ssize_t ret = write(fd, str + written, len - written);
-//         if (ret < 0) {
-//             perror("[ERR]: write failed");
-//             exit(EXIT_FAILURE);
-//         }
-//         written += ret;
-//     }
-// }
 
 static int write_msg(int fd, const void *buf, size_t n) {
     size_t off = 0;
@@ -259,7 +246,7 @@ int update_client(session_t *session, board_t *game_board, int mode) {
         msg.points = game_board->pacmans[0].points;
         board_data = malloc((game_board->width * game_board->height));
         if (board_data == NULL){
-            perror("Memory Exceeded");
+            perror("Memory Exceeded\n");
             exit(EXIT_FAILURE);
         }
         board_to_char(game_board, board_data);
@@ -425,8 +412,8 @@ void* session_thread(void *arg) {
     session_thread_arg_t *session_arg = (session_thread_arg_t*) arg;
     char directory_name[MAX_FILENAME];
     strcpy(directory_name, session_arg->directory_name);
+    free(session_arg);
 
-    //free(session_arg);
     // Random seed for any random movements
     srand((unsigned int)time(NULL));
 
@@ -448,17 +435,17 @@ void* session_thread(void *arg) {
         int response_write = write_msg(notif_tx, &response, sizeof(msg_reg_response_t));
         if (response_write < 0) {
             perror("[ERR]: write failed");
-            close(req_rx);
-            close(notif_tx);
             result = 1;
         }
         if (result == 1) {
+            close(req_rx);
+            close(notif_tx);
             continue;
         }
 
         session_t *session = malloc(sizeof(session_t));
         if (session == NULL){
-            perror("Memory Exceeded");
+            perror("Memory Exceeded\n");
             exit(EXIT_FAILURE);
         }
         pthread_mutex_init(&session->lock, NULL);
@@ -466,11 +453,10 @@ void* session_thread(void *arg) {
         session->notif_tx = notif_tx;
         session->thread_shutdown = 0;
         session->error = 0;
-
         session->id = client_id;
         session->points = malloc(sizeof(int));
         if (session->points == NULL){
-            perror("Memory Exceeded");
+            perror("Memory Exceeded\n");
             exit(EXIT_FAILURE);
         }
         *session->points = 0;
@@ -489,12 +475,13 @@ void* session_thread(void *arg) {
                 break;
             }
         }
-        ++active;
         pthread_mutex_unlock(&sessions_lock);
         if (slot == -1) {
-            fprintf(stderr, "[ERR]: No slot available\n");
+            fprintf(stderr, "[ERR]: No slot available in sessions array\n");
             pthread_mutex_destroy(&session->lock);
             sem_post(&semaforo_clientes);
+            close(req_rx);
+            close(notif_tx);
             exit(EXIT_FAILURE);
         }
 
@@ -502,25 +489,17 @@ void* session_thread(void *arg) {
 
         if (level_dir == NULL) {
             fprintf(stderr, "Failed to open directory\n");
-            pthread_mutex_lock(&session->lock);
-            session->error = 1;
-            pthread_mutex_unlock(&session->lock);
             pthread_mutex_destroy(&session->lock);
             pthread_mutex_lock(&sessions_lock);
-            --active;
             session->active = false;
             pthread_mutex_unlock(&sessions_lock);
             sem_post(&semaforo_clientes);
             continue;
         }
 
-        // terminal_init();
-
         board_t game_board;
         int accumulated_points = 0;
         bool end_game = false;
-
-        // pid_t parent_process = getpid(); // Only the parent process can create backups
 
         struct dirent* entry;
         while ((entry = readdir(level_dir)) != NULL && !end_game) {
@@ -540,7 +519,7 @@ void* session_thread(void *arg) {
                     pthread_t update_tid, pacman_tid;
                     pthread_t *ghost_tids = malloc(game_board.n_ghosts * sizeof(pthread_t));
                     if (ghost_tids == NULL){
-                        perror("Memory Exceeded");
+                        perror("Memory Exceeded\n");
                         exit(EXIT_FAILURE);
                     }
 
@@ -550,20 +529,21 @@ void* session_thread(void *arg) {
 
                     pacman_thread_arg_t *pac_arg = malloc(sizeof(pacman_thread_arg_t));
                     if (pac_arg == NULL){
-                        perror("Memory Exceeded");
+                        perror("Memory Exceeded\n");
                         exit(EXIT_FAILURE);
                     }
                     pac_arg->board = &game_board;
                     pac_arg->session = session;
                     int pac_thread_create_check = pthread_create(&pacman_tid, NULL, pacman_thread, (void*) pac_arg);
-                    if (pac_thread_create_check == -1){ //////////////////////////////////////////////////////////////////////////////////////////////////////////
-                        perror("Failed to create pacman thread");
-                        exit(EXIT_FAILURE);
+                    if (pac_thread_create_check == -1){
+                        perror("Failed to create pacman thread\n");
+                        session->thread_shutdown = 1;
+                        session->error = 1;
                     }
                     for (int i = 0; i < game_board.n_ghosts; i++) {
                         ghost_thread_arg_t *ghost_arg = malloc(sizeof(ghost_thread_arg_t));
                         if (ghost_arg == NULL){
-                            perror("Memory Exceeded");
+                            perror("Memory Exceeded\n");
                             exit(EXIT_FAILURE);
                         }
                         ghost_arg->board = &game_board;
@@ -571,22 +551,25 @@ void* session_thread(void *arg) {
                         ghost_arg->pacman_tid = pacman_tid;
                         ghost_arg->session = session;
                         int ghost_thread_create_check = pthread_create(&ghost_tids[i], NULL, ghost_thread, (void*) ghost_arg);
-                        if (ghost_thread_create_check == -1){ //////////////////////////////////////////////////////////////////////////////////////////////////////////
-                            perror("Failed to create pacman thread");
-                            exit(EXIT_FAILURE);
+                        if (ghost_thread_create_check == -1){
+                            perror("Failed to create ghost thread\n");
+                            session->thread_shutdown = 1;
+                            session->error = 1;
+                            break;
                         }
                     }
                     updates_thread_arg_t *updates_arg = malloc(sizeof(updates_thread_arg_t));
                     if (updates_arg == NULL){
-                        perror("Memory Exceeded");
+                        perror("Memory Exceeded\n");
                         exit(EXIT_FAILURE);
                     }
                     updates_arg->board = &game_board;
                     updates_arg->session = session;
                     int update_thread_create_check = pthread_create(&update_tid, NULL, updates_thread, (void*) updates_arg);
-                    if (update_thread_create_check == -1){ //////////////////////////////////////////////////////////////////////////////////////////////////////////
-                        perror("Failed to create pacman thread");
-                        exit(EXIT_FAILURE);
+                    if (update_thread_create_check == -1){
+                        perror("Failed to create updates thread\n");
+                        session->thread_shutdown = 1;
+                        session->error = 1;
                     }
 
                     pthread_join(pacman_tid, NULL);
@@ -605,7 +588,6 @@ void* session_thread(void *arg) {
                     pthread_mutex_unlock(&session->lock);
 
                     pthread_join(update_tid, NULL);
-                    // free(ncurses_arg);
                     for (int i = 0; i < game_board.n_ghosts; i++) {
                         pthread_join(ghost_tids[i], NULL);
                     }
@@ -638,7 +620,6 @@ void* session_thread(void *arg) {
         }
         if (next_client) {
             pthread_mutex_lock(&sessions_lock);
-            --active;
             session->active = false;
             pthread_mutex_unlock(&sessions_lock);
             closedir(level_dir);
@@ -657,19 +638,19 @@ void* session_thread(void *arg) {
         while (true) {
             char msg;
             ssize_t bytes_read = read(req_rx, &msg, 1);
-            if (bytes_read == -1){/////////////////////////////////////////////////////////////////////////
-                perror("Unable to read request pipe");
-                exit(EXIT_FAILURE);
+            if (bytes_read == -1){
+                perror("[ERR]: Unable to read disconnect message\n");
+                break;
             }
             if (bytes_read == 1) {
-                if (msg == '2') break;
+                if (msg == ('0'+OP_CODE_DISCONNECT)) break;
                 continue;
             }
             if (bytes_read == 0) {
                 break;
             }
             if (errno == EINTR) continue;
-            perror("[ERR]: read disconnect failed");
+            perror("[ERR]: Invalid disconnect message\n");
             break;
         }
 
@@ -679,7 +660,6 @@ void* session_thread(void *arg) {
 
         pthread_mutex_destroy(&session->lock);
         pthread_mutex_lock(&sessions_lock);
-        --active;
         session->active = false;
         pthread_mutex_unlock(&sessions_lock);
         sem_post(&semaforo_clientes);
@@ -691,8 +671,8 @@ int compare_sessions(const void *a, const void *b) {
     session_t *session_a = *(session_t**)a;
     session_t *session_b = *(session_t**)b;
 
-    if (session_b->active && (!session_a->active)) return 1;
-    if (session_a->active && (!session_b->active)) return -1;
+    // if (session_b->active && (!session_a->active)) return 1;
+    // if (session_a->active && (!session_b->active)) return -1;
 
     int* b_points_ptr = session_b->points;
     int* a_points_ptr = session_a->points;
@@ -704,27 +684,25 @@ int compare_sessions(const void *a, const void *b) {
     return session_a->id - session_b->id;
 }
 
-void top5_generator() {
+void leaderboard_generator() {
     pthread_mutex_lock(&sessions_lock);
 
     session_t* sessions_copy[max_sessions];
     int count = 0;
     for (int i = 0; i < max_sessions; i++) {
-        if (sessions[i] != NULL) {
+        if (sessions[i] != NULL && sessions[i]->active) {
             sessions_copy[count++] = sessions[i];
         }
     }
-
-    int active_sessions = active;
     pthread_mutex_unlock(&sessions_lock);
 
     qsort(sessions_copy, count, sizeof(session_t*), compare_sessions);
 
     int fd = open("topPlayers.txt", O_CREAT|O_TRUNC|O_WRONLY, 0644);
     int top_n;
-    if (active_sessions < TOP_SESSIONS) {
-        top_n = active_sessions;
-    } else top_n = TOP_SESSIONS;
+    if (count < LEADERBOARD_SIZE) {
+        top_n = count;
+    } else top_n = LEADERBOARD_SIZE;
 
     for (int i = 0; i < top_n; i++) {
         session_t* session = sessions_copy[i];
@@ -751,34 +729,32 @@ void hosting(int reg_rx,char *reg_pipe_pathname) {
         int result = 0;
         if (sigusr1_received) {
             sigusr1_received = 0;
-            top5_generator();
+            leaderboard_generator();
         }
         msg_registration_t msg_reg;
         ssize_t ret = read(reg_rx, &msg_reg, sizeof(msg_registration_t));
+        // se não houver clients conectados/não há mais mensagens por ler
         if (ret == 0) {
-            // All writers disconnected → FIFO reached EOF
+            // fecha e volta a abrir o pipe
             close(reg_rx);
-            // Reopen FIFO (still read-only)
             do {
                 reg_rx = open(reg_pipe_pathname, O_RDONLY | O_NONBLOCK);
             } while (reg_rx == -1 && errno == EINTR);
-
             continue;
+
         } if (ret == -1) {
             if (errno == EINTR) {
                 continue;
             }
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                // Sem dados disponíveis, espera um pouco
+                // sem dados disponíveis, espera um pouco
                 sleep_ms(100);
                 continue;
             }
             fprintf(stderr, "[ERR]: read failed: %s\n", strerror(errno));
-            // continue
-            result = 1;
+            continue;
         }
 
-        bool valid = true;
         int req_rx = 0;
         while (true) {
             req_rx = open(msg_reg.req_pipe_path, O_RDONLY | O_NONBLOCK);
@@ -787,50 +763,46 @@ void hosting(int reg_rx,char *reg_pipe_pathname) {
             }
             else if (req_rx == -1) {
                 perror("[ERR]: req_pipe open failed");
-                valid = false;
+                result = 1;
                 break;
             } else {
                 break;
             }
 
         }
-        if (valid == false) result = 1;
-        // Remove O_NONBLOCK depois de abrir para I/O ser bloqueante normal
+        if (result==1) continue;
+        // Remove O_NONBLOCK depois de abrir
         int flags = fcntl(req_rx, F_GETFL, 0);
         fcntl(req_rx, F_SETFL, flags & ~O_NONBLOCK);
 
-        valid = true;
         int notif_tx = 0;
         while (true) {
             notif_tx = open(msg_reg.notif_pipe_path, O_WRONLY | O_NONBLOCK);
+            // se não estiver aberto no client
             if (notif_tx == -1 && errno == ENXIO) {
                 sleep_ms(100);
             }
             else if (notif_tx == -1) {
                 perror("[ERR]: req_pipe open failed");
-                valid = false;
+                result = 1;
                 break;
             } else {
                 break;
             }
 
         }
-        if (valid == false) result = 1;
-        // Remove O_NONBLOCK depois de abrir para I/O ser bloqueante normal
+        if (result==1) continue;
+
+        // Remove O_NONBLOCK depois de abrir
         flags = fcntl(notif_tx, F_GETFL, 0);
         fcntl(notif_tx, F_SETFL, flags & ~O_NONBLOCK);
 
-        if (result==1) continue;
-
-        char client_id_char[MAX_PIPE_PATH_LENGTH];
-        int parsed = sscanf(msg_reg.req_pipe_path, "/tmp/%s_request", client_id_char);
+        int client_id;
+        int parsed = sscanf(msg_reg.req_pipe_path, "/tmp/%d_request", &client_id);
         if (parsed != 1) {
             perror("[ERR]: req_pipe parse failed");
             pthread_exit(NULL);
         }
-
-        int client_id = atoi(client_id_char);
-
 
         enqueue_registration(req_rx, notif_tx, client_id);
 
@@ -843,24 +815,23 @@ void hosting(int reg_rx,char *reg_pipe_pathname) {
 int main(int argc, char** argv) {
     if (argc != 4) {
         printf("Usage: %s <level_directory> <max_games> <nome_do_FIFO_de_registo>\n", argv[0]);
-        return -1;
+        exit(EXIT_FAILURE);
     }
-    //SIGPIPE não fecha o programa
-    // signal(SIGPIPE, SIG_IGN);
+
     struct sigaction sa;
     sa.sa_handler = sig_handler;
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = SA_RESTART;
     if (sigaction(SIGUSR1, &sa, NULL) == -1) {
         perror("sigaction failed");
-        return EXIT_FAILURE;
+        exit(EXIT_FAILURE);
     }
 
     int max_games = atoi(argv[2]);
     max_sessions = max_games;
     sessions = malloc(max_games * sizeof(session_t*));
     if (sessions == NULL){
-        perror("Memory Exceeded");
+        perror("Memory Exceeded\n");
         exit(EXIT_FAILURE);
     }
     for (int i = 0; i < max_games; i++) {
@@ -874,46 +845,43 @@ int main(int argc, char** argv) {
 
     /* remove pipe if it exists */
     if (unlink(reg_pipe_pathname) != 0 && errno != ENOENT) {
-        perror("[ERR]: unlink(%s) failed");
-        return EXIT_FAILURE;
-        //exit(EXIT_FAILURE);
+        perror("[ERR]: unlink(%s) failed\n");
+        exit(EXIT_FAILURE);
 
     }
 
     /* create pipe */
     if (mkfifo(reg_pipe_pathname, 0640) != 0) {
-        perror("[ERR]: mkfifo failed");
-        return EXIT_FAILURE;
-        //exit(EXIT_FAILURE);
+        perror("[ERR]: mkfifo failed\n");
+        exit(EXIT_FAILURE);
 
     }
 
     int reg_rx = open(reg_pipe_pathname, O_RDONLY);
     if (reg_rx == -1) {
-        perror("[ERR]: open failed");
-        return EXIT_FAILURE;
-        //exit(EXIT_FAILURE);
+        perror("[ERR]: open failed\n");
+        exit(EXIT_FAILURE);
     }
+
     //torna read non-blocking
     int flags = fcntl(reg_rx, F_GETFL, 0);
     fcntl(reg_rx, F_SETFL, flags | O_NONBLOCK);
 
     pthread_t *session_tids = malloc(max_games * sizeof(pthread_t));
     if (session_tids == NULL){
-        perror("Memory Exceeded");
+        perror("[ERR]: Memory Exceeded\n");
         exit(EXIT_FAILURE);
     }
     for (int i = 0; i < max_games; i++) {
         session_thread_arg_t *s_arg = malloc(sizeof(session_thread_arg_t));
         if (s_arg == NULL){
-            perror("Memory Exceeded");
+            perror("[ERR]: Memory Exceeded\n");
             exit(EXIT_FAILURE);
         }
         strcpy(s_arg->directory_name, argv[1]);
-        s_arg->thread_id = i;
-        int session_thread_create_check = pthread_create(&session_tids[i], NULL, session_thread, (void*) s_arg);
-        if (session_thread_create_check == -1){ //////////////////////////////////////////////////////////////////////////////////////////////////////////
-            perror("Failed to create pacman thread");
+        int ret = pthread_create(&session_tids[i], NULL, session_thread, (void*) s_arg);
+        if (ret == -1){
+            perror("[ERR]: Failed to create session thread\n");
             exit(EXIT_FAILURE);
         }
     }
