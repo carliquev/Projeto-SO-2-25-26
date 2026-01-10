@@ -756,7 +756,7 @@ void leaderboard_generator() {
     // Organiza as copias das sessoes por pontos (id em caso de empate)
     qsort(sessions_copy, count, sizeof(session_t*), compare_sessions);
 
-    // Abre o ficheiro topPlayers.txt, creando-o se nao existir e
+    // Abre o ficheiro topPlayers.txt, criando-o se nao existir e
     // apagando os seus conteudos se existir
     int fd = open("topPlayers.txt", O_CREAT|O_TRUNC|O_WRONLY, 0644);
     // Garante que nao ha problemas se houver menos clientes conectados
