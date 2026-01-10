@@ -234,11 +234,6 @@ void board_to_char(board_t *board, char* char_board) {
     }
 }
 
-void screen_refresh(board_t * game_board, int mode) {
-    debug("REFRESH\n");
-    draw_board(game_board, mode);
-    refresh_screen();
-}
 
 int update_client(session_t *session, board_t *game_board, int mode) {
     int notif_pipe_fd = session->notif_tx;
@@ -301,7 +296,6 @@ void* updates_thread(void *arg) {
         if (shutdown) {
             pthread_exit(NULL);
         }
-        // screen_refresh(board, DRAW_MENU);
         pthread_rwlock_wrlock(&board->state_lock);
         update_client(session, board, DEFAULT);
         pthread_rwlock_unlock(&board->state_lock);
@@ -527,8 +521,6 @@ void* session_thread(void *arg) {
 
                 game_board.state = CONTINUE_PLAY;
                 update_client(session, &game_board, DEFAULT);
-                // draw_board(&game_board, DRAW_MENU);
-                // refresh_screen();
 
                 while(true) {
                     pthread_t ncurses_tid, pacman_tid;
@@ -581,7 +573,6 @@ void* session_thread(void *arg) {
                     int result = game_board.state;
 
                     if(result == NEXT_LEVEL) {
-                        // screen_refresh(&game_board, DRAW_WIN);
                         accumulated_points = game_board.pacmans[0].points;
                         update_client(session, &game_board, VICTORY);
                         sleep_ms(game_board.tempo);
@@ -589,23 +580,14 @@ void* session_thread(void *arg) {
                     }
 
                     if(result == QUIT_GAME) {
-                        // screen_refresh(&game_board, DRAW_GAME_OVER);
                         update_client(session, &game_board, GAMEOVER);
                         sleep_ms(game_board.tempo);
                         end_game = true;
                         break;
                     }
 
-                    // screen_refresh(&game_board, DRAW_MENU);
                     update_client(session, &game_board, DEFAULT);
-
                 }
-
-                // print_board(&game_board);
-                // if (game_board.pacmans[0].alive) {
-                //     update_client(session, &game_board, VICTORY);
-                // }
-
                 unload_level(&game_board);
                 if (next_client==true) {
                     break;
