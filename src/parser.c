@@ -89,8 +89,20 @@ int read_level(board_t* board, char* filename, char* dirname) {
     
     // the end of the file contains the grid
     board->board = calloc(board->width * board->height, sizeof(board_pos_t));
+    if (board->board == NULL){
+        perror("Memory Exceeded");
+        exit(EXIT_FAILURE);
+    }
     board->pacmans = calloc(board->n_pacmans, sizeof(pacman_t));
+    if (board->pacmans == NULL){
+        perror("Memory Exceeded");
+        exit(EXIT_FAILURE);
+    }
     board->ghosts = calloc(board->n_ghosts, sizeof(ghost_t));
+    if (board->ghosts == NULL){
+        perror("Memory Exceeded");
+        exit(EXIT_FAILURE);
+    }
 
     int row = 0;
     // command here still holds the previous line

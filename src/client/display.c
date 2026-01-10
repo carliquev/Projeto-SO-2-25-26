@@ -133,6 +133,10 @@ void draw_board_client(Board board) {
 char* get_board_displayed(board_t* board) {
     size_t buffer_size = (board->width  * board->height) + 1;
     char* output = malloc(buffer_size);
+    if (output == NULL){
+        perror("Memory Exceeded");
+        exit(EXIT_FAILURE);
+    }
     size_t pos = 0;
     for (int y = 0; y < board->height; y++) {
         for (int x = 0; x < board->width; x++) {

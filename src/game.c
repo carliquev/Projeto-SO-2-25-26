@@ -258,6 +258,10 @@ int update_client(session_t *session, board_t *game_board, int mode) {
         msg.tempo = game_board->tempo;
         msg.points = game_board->pacmans[0].points;
         board_data = malloc((game_board->width * game_board->height));
+        if (board_data == NULL){
+            perror("Memory Exceeded");
+            exit(EXIT_FAILURE);
+        }
         board_to_char(game_board, board_data);
     } else{
         msg.width = 0;
@@ -453,6 +457,10 @@ void* session_thread(void *arg) {
         }
 
         session_t *session = malloc(sizeof(session_t));
+        if (session == NULL){
+            perror("Memory Exceeded");
+            exit(EXIT_FAILURE);
+        }
         pthread_mutex_init(&session->lock, NULL);
         session->req_rx = req_rx;
         session->notif_tx = notif_tx;
@@ -461,6 +469,10 @@ void* session_thread(void *arg) {
 
         session->id = client_id;
         session->points = malloc(sizeof(int));
+        if (session->points == NULL){
+            perror("Memory Exceeded");
+            exit(EXIT_FAILURE);
+        }
         *session->points = 0;
         session->active = true;
 
@@ -527,17 +539,29 @@ void* session_thread(void *arg) {
                 while(true) {
                     pthread_t update_tid, pacman_tid;
                     pthread_t *ghost_tids = malloc(game_board.n_ghosts * sizeof(pthread_t));
+                    if (ghost_tids == NULL){
+                        perror("Memory Exceeded");
+                        exit(EXIT_FAILURE);
+                    }
 
                     session->thread_shutdown = 0;
 
                     debug("Creating threads\n");
 
                     pacman_thread_arg_t *pac_arg = malloc(sizeof(pacman_thread_arg_t));
+                    if (pac_arg == NULL){
+                        perror("Memory Exceeded");
+                        exit(EXIT_FAILURE);
+                    }
                     pac_arg->board = &game_board;
                     pac_arg->session = session;
                     pthread_create(&pacman_tid, NULL, pacman_thread, (void*) pac_arg);
                     for (int i = 0; i < game_board.n_ghosts; i++) {
                         ghost_thread_arg_t *ghost_arg = malloc(sizeof(ghost_thread_arg_t));
+                        if (ghost_arg == NULL){
+                            perror("Memory Exceeded");
+                            exit(EXIT_FAILURE);
+                        }
                         ghost_arg->board = &game_board;
                         ghost_arg->ghost_index = i;
                         ghost_arg->pacman_tid = pacman_tid;
@@ -545,6 +569,10 @@ void* session_thread(void *arg) {
                         pthread_create(&ghost_tids[i], NULL, ghost_thread, (void*) ghost_arg);
                     }
                     updates_thread_arg_t *updates_arg = malloc(sizeof(updates_thread_arg_t));
+                    if (updates_arg == NULL){
+                        perror("Memory Exceeded");
+                        exit(EXIT_FAILURE);
+                    }
                     updates_arg->board = &game_board;
                     updates_arg->session = session;
                     pthread_create(&update_tid, NULL, updates_thread, (void*) updates_arg);
@@ -816,6 +844,10 @@ int main(int argc, char** argv) {
     int max_games = atoi(argv[2]);
     max_sessions = max_games;
     sessions = malloc(max_games * sizeof(session_t*));
+    if (sessions == NULL){
+        perror("Memory Exceeded");
+        exit(EXIT_FAILURE);
+    }
     for (int i = 0; i < max_games; i++) {
         sessions[i] = NULL;
     }
@@ -852,8 +884,16 @@ int main(int argc, char** argv) {
     fcntl(reg_rx, F_SETFL, flags | O_NONBLOCK);
 
     pthread_t *session_tids = malloc(max_games * sizeof(pthread_t));
+    if (session_tids == NULL){
+        perror("Memory Exceeded");
+        exit(EXIT_FAILURE);
+    }
     for (int i = 0; i < max_games; i++) {
         session_thread_arg_t *s_arg = malloc(sizeof(session_thread_arg_t));
+        if (s_arg == NULL){
+            perror("Memory Exceeded");
+            exit(EXIT_FAILURE);
+        }
         strcpy(s_arg->directory_name, argv[1]);
         s_arg->thread_id = i;
         pthread_create(&session_tids[i], NULL, session_thread, (void*) s_arg);

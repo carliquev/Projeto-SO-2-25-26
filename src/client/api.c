@@ -192,6 +192,10 @@ Board   receive_board_update() {
     game_board.game_over = msg_board.game_over;
     game_board.accumulated_points = msg_board.points;
     game_board.data = malloc((board_dim)*sizeof(char));
+    if (game_board.data == NULL){
+      perror("Memory Exceeded");
+      exit(EXIT_FAILURE);
+    }
 
     if (game_board.game_over!=2) {
       notif_read = read_msg(session.notif_pipe, game_board.data, (board_dim)*sizeof(char));
