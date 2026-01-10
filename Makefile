@@ -18,8 +18,7 @@ CLIENT   := client
 PACMANIST_OBJS := \
 	$(OBJ_DIR)/server/game.o \
 	$(OBJ_DIR)/server/parser.o \
-	$(OBJ_DIR)/server/board.o \
-	$(OBJ_DIR)/server/display.o
+	$(OBJ_DIR)/server/board.o
 
 CLIENT_OBJS := \
 	$(OBJ_DIR)/client/client_main.o \
