@@ -19,9 +19,9 @@ static void *receiver_thread(void *arg) {
 
     while (true) {
 
-        board = receive_board_update();
+        board = receive_board_update(); //Recebe todos os updates
 
-        if (board.game_over > 1 || !board.data){
+        if (board.game_over > 1 || !board.data){ //Termina se o jogo tiver acabado (pacman morreu)
             pthread_mutex_lock(&mutex);
             stop_execution = true;
             pthread_mutex_unlock(&mutex);
@@ -43,7 +43,7 @@ static void *receiver_thread(void *arg) {
 }
 
 int main(int argc, char *argv[]) {
-    if (argc != 3 && argc != 4) {
+    if (argc != 3 && argc != 4) { // Verifica se os parametros de execuçao do cliente foram cumpridos
         fprintf(stderr,
             "Usage: %s <client_id> <register_pipe> [commands_file]\n",
             argv[0]);
@@ -52,14 +52,14 @@ int main(int argc, char *argv[]) {
 
     const char *client_id = argv[1];
     const char *register_pipe = argv[2];
-    const char *commands_file = (argc == 4) ? argv[3] : NULL;
+    const char *commands_file = (argc == 4) ? argv[3] : NULL; // Verifica se existe command file
 
 
     FILE *cmd_fp = NULL;
     if (commands_file) {
         cmd_fp = fopen(commands_file, "r");
         if (!cmd_fp) {
-            perror("Failed to open commands file");
+            perror("[ERR] Failed to open commands file\n");
             return 1;
         }
     }
@@ -76,14 +76,15 @@ int main(int argc, char *argv[]) {
     open_debug_file("client-debug.log");
 
     if (pacman_connect(req_pipe_path, notif_pipe_path, register_pipe) != 0) {
-        perror("Failed to connect to server");
+        // Se o cliente for incapaz de se conectar
+        perror("[ERR] Failed to connect to server\n");
         return 1;
     }
 
     pthread_t receiver_thread_id;
     int receiver_thread_create_check = pthread_create(&receiver_thread_id, NULL, receiver_thread, NULL);
     if (receiver_thread_create_check == -1){
-        perror("Failed to create pacman thread");
+        perror("[ERR] Failed to create pacman thread\n");
         pacman_disconnect();
         exit(EXIT_FAILURE);
     }
@@ -165,7 +166,7 @@ int main(int argc, char *argv[]) {
     pthread_mutex_destroy(&mutex);
 
     if (pacman_disconnect() == -1) {
-        perror("[ERR]: client disconnect error");
+        perror("[ERR]: client disconnect error\n");
         return EXIT_FAILURE;
     }
     terminal_cleanup();
