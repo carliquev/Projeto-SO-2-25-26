@@ -1,0 +1,13 @@
+D
+D
+S
+S
+S
+S
+A
+A
+A
+W
+W
+W
+W
